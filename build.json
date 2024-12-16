@@ -1,6 +1,8 @@
 {
     "setting" : {
         "is-android" : false,
-        "main-package-path" : "test"
+        "main-package-path" : "test",
+        "out-path" : "bin/test.bin",
+        "build-type" : "minimal"
     }
 }
