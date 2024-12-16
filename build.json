@@ -1,0 +1,6 @@
+{
+    "setting" : {
+        "is-android" : false,
+        "main-package-path" : "test"
+    }
+}
