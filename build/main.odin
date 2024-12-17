@@ -52,23 +52,25 @@ main :: proc() {
 	
 		setting := (json_data.(json.Object)["setting"]).(json.Object)
 	
-		if !setting["is-android"].(json.Boolean) {
-			out_path := strings.join({"-out:", setting["out-path"].(json.String)}, "")
-			defer delete(out_path)
+		is_android := setting["is-android"].(json.Boolean);
+		out_path := strings.join({"-out:", setting["out-path"].(json.String)}, "")
+		defer delete(out_path)
 
-			// Sets the optimization mode for compilation.
-			// Available options:
-			// 		-o:none
-			// 		-o:minimal
-			// 		-o:size
-			// 		-o:speed
-			// 		-o:aggressive (use this with caution)
-			// The default is -o:minimal.
-			o := strings.join({"-o:", setting["build-type"].(json.String)}, "")
-			defer delete(o)
+		// Sets the optimization mode for compilation.
+		// Available options:
+		// 		-o:none
+		// 		-o:minimal
+		// 		-o:size
+		// 		-o:speed
+		// 		-o:aggressive (use this with caution)
+		// The default is -o:minimal.
+		o := strings.join({"-o:", setting["build-type"].(json.String)}, "")
+		defer delete(o)
 
-			os.make_directory("bin")
-			os.execvp("odin", {"build", setting["main-package-path"].(json.String), "-no-bounds-check",  out_path, o})
+		os.make_directory("bin")
+		os.execvp("odin", {"build", setting["main-package-path"].(json.String), "-no-bounds-check",  out_path, o, ({}) if !is_android else "-define:__ANDROID__=true"})
+
+		if is_android {
 		}
 	}
 }
