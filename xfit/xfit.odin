@@ -1,11 +1,23 @@
 package xfit
 
 import "core:fmt"
-import "xfit_system"
+import "core:os"
+
+is_android :: __ANDROID__
 
 
-__ANDROID__ :: xfit_system.__ANDROID__
+xfit_main :: proc(
+_init : proc(),
+_update : proc(dt:f64) =  proc(dt:f64) {},
+_destroy : proc() =  proc() {}
+) {
+    init = _init
+    update = _update
+    destroy = _destroy
 
-xfit_main :: proc() {
-    xfit_system.system_start()
+    system_start()
 }
+
+
+
+

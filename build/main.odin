@@ -64,11 +64,16 @@ main :: proc() {
 		// 		-o:speed
 		// 		-o:aggressive (use this with caution)
 		// The default is -o:minimal.
-		o := strings.join({"-o:", setting["build-type"].(json.String)}, "")
-		defer delete(o)
+		
 
 		os.make_directory("bin")
-		os.execvp("odin", {"build", setting["main-package-path"].(json.String), "-no-bounds-check",  out_path, o, ({}) if !is_android else "-define:__ANDROID__=true"})
+		if strings.compare(setting["build-type"].(json.String), "minimal") == 0 {
+			os.execvp("odin", {"build", setting["main-package-path"].(json.String), "-debug",  out_path, ({}) if !is_android else "-define:__ANDROID__=true"})
+		} else {
+			o := strings.join({"-o:", setting["build-type"].(json.String)}, "")
+			defer delete(o)
+			os.execvp("odin", {"build", setting["main-package-path"].(json.String), "-no-bounds-check",  out_path, o, ({}) if !is_android else "-define:__ANDROID__=true"})
+		}
 
 		if is_android {
 		}
