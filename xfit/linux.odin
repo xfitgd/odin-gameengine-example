@@ -16,6 +16,7 @@ wnd:xlib.Window
 delWnd:xlib.Atom
 stateWnd:xlib.Atom
 wndExtent:[4]c.long
+rootWnd:xlib.Window
 
 
 _NET_WM_STATE_TOGGLE :: 2
@@ -23,7 +24,9 @@ _NET_WM_STATE_TOGGLE :: 2
 systemLinuxStart :: proc() {
     if display = xlib.OpenDisplay(nil); display == nil do panic("")
 
-    screen_res := xlib.XRRGetScreenResources(display, xlib.DefaultRootWindow(display))
+    rootWnd = xlib.DefaultRootWindow(display)
+
+    screen_res := xlib.XRRGetScreenResources(display, rootWnd)
     defer xlib.XRRFreeScreenResources(screen_res)
 
     le := math.min(screen_res.ncrtc, screen_res.noutput)
@@ -41,7 +44,7 @@ systemLinuxStart :: proc() {
             }
         }
         if mode_ == nil do continue
-        append(&monitors, monitor_info{isPrimary = i == i32(defScreenIdx), 
+        append(&monitors, monitorInfo{isPrimary = i == i32(defScreenIdx), 
             rect=xmath.rectInit([2]i32{crtc_info.x,crtc_info.y},
                 [2]i32{i32(crtc_info.width),i32(crtc_info.height)})})
         
@@ -50,17 +53,17 @@ systemLinuxStart :: proc() {
 
         last.name = strings.clone(string(output.name))
 
-        when __log__ {
+        when is_log {
             fmt.printf("XFIT SYSLOG : %smonitor %d name: %s, x:%d, y:%d, width:%d, height:%d [\n", "primary" if last.isPrimary else "",
             i, last.name,
             crtc_info.x, crtc_info.y, crtc_info.width, crtc_info.height)
         }
         hz := f64(mode_.dotClock) / f64(mode_.hTotal * mode_.vTotal)
-        when __log__ {
+        when is_log {
             fmt.printf("monitor %d resolution: width:%d, height:%d refleshrate %f\n]\n",
             i, mode_.width, mode_.height, hz)
         }
-        last.resolution = screen_info{
+        last.resolution = screenInfo{
             monitor = last,
             refreshRate = hz,
             size = {mode_.width, mode_.height}
@@ -72,6 +75,31 @@ setWndSizeHint :: proc(first_call:bool) {
 
 }
 
+linuxGetMonitorFromWindow:: proc() -> ^monitorInfo {
+    for &value in monitors {
+        if xmath.rectPointIn(value.rect, [2]i32{windowX.?, windowY.?}) do return &value
+    }
+    return primaryMonitor
+}
+
+linuxSendFullScreenEvent :: proc(toggle:bool) {
+    evt:xlib.XEvent
+    evt.type = xlib.EventType.ClientMessage
+    evt.xclient.window = wnd
+    evt.xclient.message_type = xlib.InternAtom(display, "_NET_WM_STATE", true)
+    evt.xclient.format = 32
+    evt.xclient.data.l[0] = int(toggle)
+    evt.xclient.data.l[1] = int(xlib.InternAtom(display, "_NET_WM_STATE_FULLSCREEN", true))
+    evt.xclient.data.l[2] = 0
+
+    xlib.SendEvent(display, rootWnd, false, xlib.EventMask{.SubstructureRedirect, .SubstructureNotify}, &evt)
+}
+linuxSetFullScreenVulKan :: proc() {
+    if screenMode == .fullscreen {
+        //TODO vulkan
+    }
+}
+
 linuxStart :: proc() {
     if screenIdx > len(monitors) - 1 do screenIdx = defScreenIdx
     monitors[screenIdx].rect.x = 0
@@ -81,7 +109,7 @@ linuxStart :: proc() {
     if windowX == nil do windowX = i32(monitors[screenIdx].rect.x + monitors[screenIdx].rect.width / 4)
     if windowY == nil do windowY = i32(monitors[screenIdx].rect.y + monitors[screenIdx].rect.height / 4)
 
-    wnd = xlib.CreateWindow(display, xlib.DefaultRootWindow(display), windowX.?, windowY.?, windowWidth.?, windowHeight.?, 0,
+    wnd = xlib.CreateWindow(display, rootWnd, windowX.?, windowY.?, windowWidth.?, windowHeight.?, 0,
     xlib.CopyFromParent, xlib.WindowClass.InputOutput, (^xlib.Visual)(uintptr(xlib.CopyFromParent)), xlib.WindowAttributeMask{}, nil)
 
     xlib.SelectInput(display, wnd, xlib.EventMask{ .KeyPress, .KeyRelease, .ButtonRelease, .ButtonPress, .PointerMotion, .StructureNotify, .FocusChange })
@@ -117,6 +145,12 @@ linuxStart :: proc() {
     prevWindowHeight = windowHeight.?
 
     if screenMode != .window {
-        
+        monitor := linuxGetMonitorFromWindow()
+
+        linuxSendFullScreenEvent(true)
+
+        xlib.MoveResizeWindow(display, wnd, monitor.rect.x, monitor.rect.y, u32(monitor.rect.width), u32(monitor.rect.height))
+
+        linuxSetFullScreenVulKan()
     }
 }

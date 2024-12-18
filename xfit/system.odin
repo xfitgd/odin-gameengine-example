@@ -7,16 +7,9 @@ import "core:thread"
 import "core:math/linalg"
 import "xmath"
 
-__ANDROID__ :: #config(__ANDROID__, false)
-__log__ :: #config(__log__, true)
-
-LOG_FILE_NAME : string = "xfit_log.log"
-
-
-
 @private render_th:thread.Thread
-@private monitors:[dynamic]monitor_info
-@private primaryMonitor:^monitor_info
+@private monitors:[dynamic]monitorInfo
+@private primaryMonitor:^monitorInfo
 
 init : proc()
 update : proc(dt:f64)
@@ -24,22 +17,21 @@ destroy : proc()
 activate : proc() = proc() {}
 
 
-
-screen_info :: struct {
-    monitor : ^monitor_info,
+screenInfo :: struct {
+    monitor : ^monitorInfo,
     size : xmath.pointu,
     refreshRate: f64,
 }
 
-monitor_info :: struct {
+monitorInfo :: struct {
     rect:xmath.recti,
-    resolution:screen_info,
+    resolution:screenInfo,
     name:string,
     __windows:monitor_info_windows,
     isPrimary:bool
 }
 
-system_start :: proc() {
+systemStart :: proc() {
     when ODIN_OS == .Linux {
         systemLinuxStart()
     } else when ODIN_OS == .Windows {
@@ -49,17 +41,22 @@ system_start :: proc() {
     }
 }
 
-panic_log ::proc(_err:any, expr := #caller_expression(_err), loc := #caller_location) {
-    when ! __ANDROID__  {
-        fd, err := os.open(LOG_FILE_NAME, os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0o644)
-        if err == nil {
-            
-            defer os.close(fd)
-            fmt.fprintln(fd, expr)
-            fmt.fprintln(fd, loc)
-            fmt.fprintln(fd, #procedure, "called by", loc.procedure)
-            fmt.fprintln(fd,"-------------------------------------------------")
+panicLog ::proc(_err:any, expr := #caller_expression(_err), loc := #caller_location) {
+    when !is_android  {
+        if len(LOG_FILE_NAME) > 0 {
+            fd, err := os.open(LOG_FILE_NAME, os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0o644)
+            if err == nil {          
+                defer os.close(fd)
+                fmt.fprintln(fd, expr)
+                fmt.fprintln(fd, loc)
+                fmt.fprintln(fd, #procedure, "called by", loc.procedure)
+                fmt.fprintln(fd,"-------------------------------------------------")
+            }
         }
     }
     panic(expr, loc)
+}
+
+@private renderFunc :: proc() {
+    
 }

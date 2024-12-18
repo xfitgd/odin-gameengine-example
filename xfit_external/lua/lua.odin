@@ -3,9 +3,30 @@ package lua;
 import "core:os"
 import "core:c"
 
-when os.OS == "windows" do foreign import lua "system:lua53.lib";
-when os.OS == "linux" do foreign import lua "system:lua53";
-when os.OS == "darwin" do foreign import lua "system:lua53";
+// when ODIN_OS == .WINDOWS do foreign import lua "system:lua53.lib";
+// when os.OS == "linux" do foreign import lua "system:lua53";
+// when os.OS == "darwin" do foreign import lua "system:lua53";
+
+__ANDROID__ :: #config(__ANDROID__, false)
+
+when ODIN_OS == .Linux {
+	when __ANDROID__ {
+		when ODIN_ARCH == .amd64 do	foreign import lua "../android/lua/liblua_amd64.a"
+		when ODIN_ARCH == .i386 do	foreign import lua "../android/lua/liblua_i386.a"
+		when ODIN_ARCH == .arm32 do	foreign import lua "../android/lua/liblua_arm32.a"
+		when ODIN_ARCH == .arm64 do	foreign import lua "../android/lua/liblua_arm64.a"
+		when ODIN_ARCH == .riscv64 do foreign import lua "../android/lua/liblua_riscv64.a"
+	} else {
+		when ODIN_ARCH == .amd64 do	foreign import lua "../linux/lua/liblua_amd64.a"
+		when ODIN_ARCH == .i386 do	foreign import lua "../linux/lua/liblua_i386.a"
+		when ODIN_ARCH == .arm32 do	foreign import lua "../linux/lua/liblua_arm32.a"
+		when ODIN_ARCH == .arm64 do	foreign import lua "../linux/lua/liblua_arm64.a"
+		when ODIN_ARCH == .riscv64 do foreign import lua "../linux/lua/liblua_riscv64.a"
+	}
+} else when ODIN_OS == .Windows {
+	when ODIN_ARCH == .amd64 do	foreign import lua "../windows/lua/liblua_amd64.a"
+	when ODIN_ARCH == .i386 do foreign import lua "../windows/lua/liblua_i386.a"
+}
 
 @(default_calling_convention = "c")
 foreign lua {

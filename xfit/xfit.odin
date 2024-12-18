@@ -3,7 +3,11 @@ package xfit
 import "core:fmt"
 import "core:os"
 
-is_android :: __ANDROID__
+
+is_android :: #config(__ANDROID__, false)
+is_log :: #config(__log__, true)
+
+LOG_FILE_NAME : string = "xfit_log.log"
 
 
 xfit_main :: proc(
@@ -15,7 +19,7 @@ _destroy : proc() =  proc() {}
     update = _update
     destroy = _destroy
 
-    system_start()
+    systemStart()
 }
 
 
