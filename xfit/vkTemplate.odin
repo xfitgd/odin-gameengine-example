@@ -156,12 +156,50 @@ vkDefaultPipelineDynamicStateCreateInfo := vk.PipelineDynamicStateCreateInfo {
 	pDynamicStates    = &vkDefaultDynamicStates[0],
 }
 
+@(require_results) vkPipelineInputAssemblyStateCreateInfoInit :: proc(
+	topology: vk.PrimitiveTopology =  vk.PrimitiveTopology.TRIANGLE_LIST,
+	primitiveRestartEnable: b32 = false,
+	pNext: rawptr = nil,
+	flags: vk.PipelineInputAssemblyStateCreateFlags = {},
+) -> vk.PipelineInputAssemblyStateCreateInfo {
+	return {
+		sType = vk.StructureType.GRAPHICS_PIPELINE_CREATE_INFO,
+		pNext = pNext,
+		flags = flags,
+	}
+}
+
+@(require_results) vkPipelineViewportStateCreateInfoInit :: proc(
+	viewportCount: u32 = 1,
+	pViewports:    [^]vk.Viewport = nil,
+	scissorCount:  u32 = 1,
+	pScissors:     [^]vk.Rect2D = nil,
+	flags:         vk.PipelineViewportStateCreateFlags = {},
+	pNext:         rawptr,
+) -> vk.PipelineViewportStateCreateInfo {
+	return {
+		sType = vk.StructureType.PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+		viewportCount = viewportCount,
+		pViewports = pViewports,
+		scissorCount = scissorCount,
+		pScissors = pScissors,
+		flags = flags,
+		pNext = pNext,
+	}
+}
+
+@(private="file") __vkDefaultPipelineColorBlendAttachmentState := [1]vk.PipelineColorBlendAttachmentState{vkPipelineColorBlendAttachmentStateInit()}
+vkDefaultPipelineColorBlendStateCreateInfo := vkPipelineColorBlendStateCreateInfoInit(__vkDefaultPipelineColorBlendAttachmentState[:1])
+
+vkDefaultPipelineMultisampleStateCreateInfo := vkPipelineMultisampleStateCreateInfoInit()
+vkDefaultPipelineInputAssemblyStateCreateInfo := vkPipelineInputAssemblyStateCreateInfoInit()
+vkDefaultPipelineRasterizationStateCreateInfo := vkPipelineRasterizationStateCreateInfoInit()
+
 @(require_results) vkGraphicsPipelineCreateInfoInit :: proc(
-	pStages: [^]vk.PipelineShaderStageCreateInfo,
+	stages: []vk.PipelineShaderStageCreateInfo,
 	layout: vk.PipelineLayout,
 	renderPass: vk.RenderPass,
 	pVertexInputState: ^vk.PipelineVertexInputStateCreateInfo,
-	stageCount: u32 = 2,
 	pInputAssemblyState: ^vk.PipelineInputAssemblyStateCreateInfo = nil,
 	pTessellationState: ^vk.PipelineTessellationStateCreateInfo = nil,
 	pViewportState: ^vk.PipelineViewportStateCreateInfo = nil,
@@ -169,22 +207,22 @@ vkDefaultPipelineDynamicStateCreateInfo := vk.PipelineDynamicStateCreateInfo {
 	pMultisampleState: ^vk.PipelineMultisampleStateCreateInfo = nil,
 	pDepthStencilState: ^vk.PipelineDepthStencilStateCreateInfo = nil,
 	pColorBlendState: ^vk.PipelineColorBlendStateCreateInfo = nil,
-	pDynamicState: ^vk.PipelineDynamicStateCreateInfo = nil, //vkDefaultPipelineDynamicStateCreateInfo
+	pDynamicState: ^vk.PipelineDynamicStateCreateInfo = nil,
 	subpass: u32 = 0,
 	basePipelineHandle: vk.Pipeline = 0,
 	basePipelineIndex: i32 = -1,
 ) -> vk.GraphicsPipelineCreateInfo {
 	return {
-		stageCount = stageCount,
-		pStages = pStages,
+		stageCount = auto_cast len(stages),
+		pStages = raw_data(stages),
 		pVertexInputState = pVertexInputState,
-		pInputAssemblyState = pInputAssemblyState,
+		pInputAssemblyState = pInputAssemblyState if pInputAssemblyState != nil else &vkDefaultPipelineInputAssemblyStateCreateInfo,
 		pTessellationState = pTessellationState,
-		pViewportState = pViewportState,
-		pRasterizationState = pRasterizationState,
-		pMultisampleState = pMultisampleState,
+		pViewportState = pViewportState if pViewportState != nil else nil,
+		pRasterizationState = pRasterizationState if pRasterizationState != nil else &vkDefaultPipelineRasterizationStateCreateInfo,
+		pMultisampleState = pMultisampleState if pMultisampleState != nil else &vkDefaultPipelineMultisampleStateCreateInfo,
 		pDepthStencilState = pDepthStencilState,
-		pColorBlendState = pColorBlendState,
+		pColorBlendState = pColorBlendState if pColorBlendState != nil else &vkDefaultPipelineColorBlendStateCreateInfo,
 		pDynamicState = pDynamicState if pDynamicState != nil else &vkDefaultPipelineDynamicStateCreateInfo,
 		layout = layout,
 		renderPass = renderPass,
@@ -267,14 +305,14 @@ vkDefaultPipelineDynamicStateCreateInfo := vk.PipelineDynamicStateCreateInfo {
 }
 
 @(require_results) vkPipelineMultisampleStateCreateInfoInit ::  proc(
-	rasterizationSamples:  vk.SampleCountFlags,
-	sampleShadingEnable:   b32,
-	minSampleShading:      f32,
-	pSampleMask:           ^vk.SampleMask,
-	alphaToCoverageEnable: b32,
-	alphaToOneEnable:      b32,
-    pNext:                 rawptr,
-	flags:                 vk.PipelineMultisampleStateCreateFlags,
+	rasterizationSamples:  vk.SampleCountFlags = {._1},
+	sampleShadingEnable:   b32 = true,
+	minSampleShading:      f32 = 0,
+	pSampleMask:           ^vk.SampleMask = nil,
+	alphaToCoverageEnable: b32 = false,
+	alphaToOneEnable:      b32 = false,
+    pNext:                 rawptr = nil,
+	flags:                 vk.PipelineMultisampleStateCreateFlags = {},
 ) -> vk.PipelineMultisampleStateCreateInfo {
 	return {
 		sType = vk.StructureType.PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
@@ -286,5 +324,47 @@ vkDefaultPipelineDynamicStateCreateInfo := vk.PipelineDynamicStateCreateInfo {
         alphaToOneEnable = alphaToOneEnable,
         pNext = pNext,
         flags = flags,
+	}
+}
+
+@(require_results) vkPipelineColorBlendAttachmentStateInit ::  proc(
+	blendEnable:         b32 = true,
+	srcColorBlendFactor: vk.BlendFactor = vk.BlendFactor.SRC_ALPHA,
+	dstColorBlendFactor: vk.BlendFactor = vk.BlendFactor.ONE_MINUS_SRC_ALPHA,
+	colorBlendOp:        vk.BlendOp = vk.BlendOp.ADD,
+	srcAlphaBlendFactor: vk.BlendFactor = vk.BlendFactor.ONE,
+	dstAlphaBlendFactor: vk.BlendFactor = vk.BlendFactor.ZERO,
+	alphaBlendOp:        vk.BlendOp = vk.BlendOp.ADD,
+	colorWriteMask:      vk.ColorComponentFlags = {.R,.G,.B,.A},
+) -> vk.PipelineColorBlendAttachmentState {
+	return {
+		blendEnable = blendEnable,
+		srcColorBlendFactor = srcColorBlendFactor,
+		dstColorBlendFactor = dstColorBlendFactor,
+		colorBlendOp = colorBlendOp,
+		srcAlphaBlendFactor = srcAlphaBlendFactor,
+		dstAlphaBlendFactor = dstAlphaBlendFactor,
+		alphaBlendOp = alphaBlendOp,
+		colorWriteMask = colorWriteMask,
+	}
+}
+
+@(require_results) vkPipelineColorBlendStateCreateInfoInit ::  proc(
+	pAttachments:    []vk.PipelineColorBlendAttachmentState,
+	logicOpEnable:   b32 = false,
+	logicOp:         vk.LogicOp = vk.LogicOp.COPY,
+	blendConstants:  [4]f32 = {0,0,0,0},
+	flags:           vk.PipelineColorBlendStateCreateFlags = {},
+	pNext:           rawptr = nil,
+) -> vk.PipelineColorBlendStateCreateInfo {
+	return {
+		sType = vk.StructureType.PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+		pNext = pNext,
+		flags = flags,
+		logicOpEnable = logicOpEnable,
+		logicOp = logicOp, 
+		attachmentCount = auto_cast len(pAttachments),
+		pAttachments = raw_data(pAttachments),
+		blendConstants = blendConstants,
 	}
 }
