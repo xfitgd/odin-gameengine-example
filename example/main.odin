@@ -6,16 +6,16 @@ import "../xfit"
 
 is_android :: xfit.is_android
 
-init ::proc() {
+Init ::proc() {
 
 }
-// update ::proc(dt:f64) {
+// Update ::proc(dt:f64) {
     
 // }
-// destroy ::proc() {
+// Destroy ::proc() {
     
 // }
 
 main :: proc() {
-    xfit.xfit_main(init)
+    xfit.XfitMain(Init)
 }

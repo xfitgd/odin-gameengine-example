@@ -1,156 +1,241 @@
 #+private
 package xfit
 
-import "core:fmt"
-import "core:c"
-import "core:math"
-import "core:strings"
-import "core:math/linalg"
-import "vendor:x11/xlib"
 import "base:intrinsics"
+import "core:c"
+import "core:fmt"
+import "core:math"
+import "core:math/linalg"
+import "core:strings"
+import vk "vendor:vulkan"
+import "vendor:x11/xlib"
 import "xmath"
 
-display:^xlib.Display
+display: ^xlib.Display
 defScreenIdx := 0
-wnd:xlib.Window
-delWnd:xlib.Atom
-stateWnd:xlib.Atom
-wndExtent:[4]c.long
-rootWnd:xlib.Window
+wnd: xlib.Window
+delWnd: xlib.Atom
+stateWnd: xlib.Atom
+wndExtent: [4]c.long
+rootWnd: xlib.Window
 
 
 _NET_WM_STATE_TOGGLE :: 2
 
 systemLinuxStart :: proc() {
-    if display = xlib.OpenDisplay(nil); display == nil do panic("")
+	if display = xlib.OpenDisplay(nil); display == nil do panic("")
 
-    rootWnd = xlib.DefaultRootWindow(display)
+	rootWnd = xlib.DefaultRootWindow(display)
 
-    screen_res := xlib.XRRGetScreenResources(display, rootWnd)
-    defer xlib.XRRFreeScreenResources(screen_res)
+	screen_res := xlib.XRRGetScreenResources(display, rootWnd)
+	defer xlib.XRRFreeScreenResources(screen_res)
 
-    le := math.min(screen_res.ncrtc, screen_res.noutput)
-    for i in 0..<le {
-        crtc_info := xlib.XRRGetCrtcInfo(display, screen_res, screen_res.crtcs[i])
-        output := xlib.XRRGetOutputInfo(display, screen_res, screen_res.outputs[i])
-        defer xlib.XRRFreeCrtcInfo(crtc_info)
-        defer xlib.XRRFreeOutputInfo(output)
+	le := math.min(screen_res.ncrtc, screen_res.noutput)
+	for i in 0 ..< le {
+		crtc_info := xlib.XRRGetCrtcInfo(display, screen_res, screen_res.crtcs[i])
+		output := xlib.XRRGetOutputInfo(display, screen_res, screen_res.outputs[i])
+		defer xlib.XRRFreeCrtcInfo(crtc_info)
+		defer xlib.XRRFreeOutputInfo(output)
 
-        mode_:^xlib.XRRModeInfo = nil
-        for k in 0..<screen_res.nmode {
-            if output.modes[0] == screen_res.modes[k].id {
-                mode_ = &screen_res.modes[k];
-                break;
-            }
-        }
-        if mode_ == nil do continue
-        append(&monitors, monitorInfo{isPrimary = i == i32(defScreenIdx), 
-            rect=xmath.rectInit([2]i32{crtc_info.x,crtc_info.y},
-                [2]i32{i32(crtc_info.width),i32(crtc_info.height)})})
-        
-        last := &monitors[len(monitors)-1]
-        if last.isPrimary do primaryMonitor = last
+		mode_: ^xlib.XRRModeInfo = nil
+		for k in 0 ..< screen_res.nmode {
+			if output.modes[0] == screen_res.modes[k].id {
+				mode_ = &screen_res.modes[k]
+				break
+			}
+		}
+		if mode_ == nil do continue
+		append(
+			&monitors,
+			monitorInfo {
+				isPrimary = i == i32(defScreenIdx),
+				rect = xmath.rectInit(
+					[2]i32{crtc_info.x, crtc_info.y},
+					[2]i32{i32(crtc_info.width), i32(crtc_info.height)},
+				),
+			},
+		)
 
-        last.name = strings.clone(string(output.name))
+		last := &monitors[len(monitors) - 1]
+		if last.isPrimary do primaryMonitor = last
 
-        when is_log {
-            fmt.printf("XFIT SYSLOG : %smonitor %d name: %s, x:%d, y:%d, width:%d, height:%d [\n", "primary" if last.isPrimary else "",
-            i, last.name,
-            crtc_info.x, crtc_info.y, crtc_info.width, crtc_info.height)
-        }
-        hz := f64(mode_.dotClock) / f64(mode_.hTotal * mode_.vTotal)
-        when is_log {
-            fmt.printf("monitor %d resolution: width:%d, height:%d refleshrate %f\n]\n",
-            i, mode_.width, mode_.height, hz)
-        }
-        last.resolution = screenInfo{
-            monitor = last,
-            refreshRate = hz,
-            size = {mode_.width, mode_.height}
-        }
-    }
+		last.name = strings.clone(string(output.name))
+
+		when is_log {
+			printf(
+				"XFIT SYSLOG : %smonitor %d name: %s, x:%d, y:%d, width:%d, height:%d [\n",
+				"primary" if last.isPrimary else "",
+				i,
+				last.name,
+				crtc_info.x,
+				crtc_info.y,
+				crtc_info.width,
+				crtc_info.height,
+			)
+		}
+		hz := f64(mode_.dotClock) / f64(mode_.hTotal * mode_.vTotal)
+		when is_log {
+			printf(
+				"monitor %d resolution: width:%d, height:%d refleshrate %f\n]\n",
+				i,
+				mode_.width,
+				mode_.height,
+				hz,
+			)
+		}
+		last.resolution = screenInfo {
+			monitor     = last,
+			refreshRate = hz,
+			size        = {mode_.width, mode_.height},
+		}
+	}
 }
 
-setWndSizeHint :: proc(first_call:bool) {
+setWndSizeHint :: proc(first_call: bool) {
 
 }
 
-linuxGetMonitorFromWindow:: proc() -> ^monitorInfo {
-    for &value in monitors {
-        if xmath.rectPointIn(value.rect, [2]i32{windowX.?, windowY.?}) do return &value
-    }
-    return primaryMonitor
+linuxGetMonitorFromWindow :: proc() -> ^monitorInfo {
+	for &value in monitors {
+		if xmath.rectPointIn(value.rect, [2]i32{windowX.?, windowY.?}) do return &value
+	}
+	return primaryMonitor
 }
 
-linuxSendFullScreenEvent :: proc(toggle:bool) {
-    evt:xlib.XEvent
-    evt.type = xlib.EventType.ClientMessage
-    evt.xclient.window = wnd
-    evt.xclient.message_type = xlib.InternAtom(display, "_NET_WM_STATE", true)
-    evt.xclient.format = 32
-    evt.xclient.data.l[0] = int(toggle)
-    evt.xclient.data.l[1] = int(xlib.InternAtom(display, "_NET_WM_STATE_FULLSCREEN", true))
-    evt.xclient.data.l[2] = 0
+linuxSendFullScreenEvent :: proc(toggle: bool) {
+	evt: xlib.XEvent
+	evt.type = xlib.EventType.ClientMessage
+	evt.xclient.window = wnd
+	evt.xclient.message_type = xlib.InternAtom(display, "_NET_WM_STATE", true)
+	evt.xclient.format = 32
+	evt.xclient.data.l[0] = int(toggle)
+	evt.xclient.data.l[1] = int(xlib.InternAtom(display, "_NET_WM_STATE_FULLSCREEN", true))
+	evt.xclient.data.l[2] = 0
 
-    xlib.SendEvent(display, rootWnd, false, xlib.EventMask{.SubstructureRedirect, .SubstructureNotify}, &evt)
+	xlib.SendEvent(
+		display,
+		rootWnd,
+		false,
+		xlib.EventMask{.SubstructureRedirect, .SubstructureNotify},
+		&evt,
+	)
 }
 linuxSetFullScreenVulKan :: proc() {
-    if screenMode == .fullscreen {
-        //TODO vulkan
-    }
+	if screenMode == .fullscreen {
+		//TODO vulkan
+	}
 }
 
 linuxStart :: proc() {
-    if screenIdx > len(monitors) - 1 do screenIdx = defScreenIdx
-    monitors[screenIdx].rect.x = 0
+	if screenIdx > len(monitors) - 1 do screenIdx = defScreenIdx
+	monitors[screenIdx].rect.x = 0
 
-    if windowWidth == nil do windowWidth = u32(monitors[screenIdx].rect.width / 2)
-    if windowHeight == nil do windowHeight = u32(monitors[screenIdx].rect.height / 2)
-    if windowX == nil do windowX = i32(monitors[screenIdx].rect.x + monitors[screenIdx].rect.width / 4)
-    if windowY == nil do windowY = i32(monitors[screenIdx].rect.y + monitors[screenIdx].rect.height / 4)
+	if windowWidth == nil do windowWidth = u32(monitors[screenIdx].rect.width / 2)
+	if windowHeight == nil do windowHeight = u32(monitors[screenIdx].rect.height / 2)
+	if windowX == nil do windowX = i32(monitors[screenIdx].rect.x + monitors[screenIdx].rect.width / 4)
+	if windowY == nil do windowY = i32(monitors[screenIdx].rect.y + monitors[screenIdx].rect.height / 4)
 
-    wnd = xlib.CreateWindow(display, rootWnd, windowX.?, windowY.?, windowWidth.?, windowHeight.?, 0,
-    xlib.CopyFromParent, xlib.WindowClass.InputOutput, (^xlib.Visual)(uintptr(xlib.CopyFromParent)), xlib.WindowAttributeMask{}, nil)
+	wnd = xlib.CreateWindow(
+		display,
+		rootWnd,
+		windowX.?,
+		windowY.?,
+		windowWidth.?,
+		windowHeight.?,
+		0,
+		xlib.CopyFromParent,
+		xlib.WindowClass.InputOutput,
+		(^xlib.Visual)(uintptr(xlib.CopyFromParent)),
+		xlib.WindowAttributeMask{},
+		nil,
+	)
 
-    xlib.SelectInput(display, wnd, xlib.EventMask{ .KeyPress, .KeyRelease, .ButtonRelease, .ButtonPress, .PointerMotion, .StructureNotify, .FocusChange })
-    xlib.MapWindow(display, wnd)
+	xlib.SelectInput(
+		display,
+		wnd,
+		xlib.EventMask {
+			.KeyPress,
+			.KeyRelease,
+			.ButtonRelease,
+			.ButtonPress,
+			.PointerMotion,
+			.StructureNotify,
+			.FocusChange,
+		},
+	)
+	xlib.MapWindow(display, wnd)
 
-    resAtom:xlib.Atom
-    resFmt:i32
-    resNum:uint
-    resRemain:uint
-    resData:rawptr
+	resAtom: xlib.Atom
+	resFmt: i32
+	resNum: uint
+	resRemain: uint
+	resData: rawptr
 
-    for xlib.GetWindowProperty(display, wnd,
-        xlib.InternAtom(display, "_NET_FRAME_EXTENTS", true),
-        0, 4, false, xlib.AnyPropertyType,
-        &resAtom, &resFmt, &resNum, &resRemain, &resData) != i32(xlib.Status.Success) || resNum != 4 || resRemain != 0 {
-        evt:xlib.XEvent
-        xlib.NextEvent(display, &evt)
-    }
-    intrinsics.mem_copy(&wndExtent, resData, size_of(c.long) * len(wndExtent))
-    xlib.Free(resData)
+	for xlib.GetWindowProperty(
+		    display,
+		    wnd,
+		    xlib.InternAtom(display, "_NET_FRAME_EXTENTS", true),
+		    0,
+		    4,
+		    false,
+		    xlib.AnyPropertyType,
+		    &resAtom,
+		    &resFmt,
+		    &resNum,
+		    &resRemain,
+		    &resData,
+	    ) !=
+		    i32(xlib.Status.Success) ||
+	    resNum != 4 ||
+	    resRemain != 0 {
+		evt: xlib.XEvent
+		xlib.NextEvent(display, &evt)
+	}
+	intrinsics.mem_copy(&wndExtent, resData, size_of(c.long) * len(wndExtent))
+	xlib.Free(resData)
 
-    delWnd =  xlib.InternAtom(display, "WM_DELETE_WINDOW", false)
-    stateWnd =  xlib.InternAtom(display, "WM_STATE", false)
-    xlib.SetWMProtocols(display, wnd, &delWnd, 1)
+	delWnd = xlib.InternAtom(display, "WM_DELETE_WINDOW", false)
+	stateWnd = xlib.InternAtom(display, "WM_STATE", false)
+	xlib.SetWMProtocols(display, wnd, &delWnd, 1)
 
-    setWndSizeHint(true)
-    xlib.MoveWindow(display, wnd, windowX.?, windowY.?)
-    xlib.Flush(display)
+	setWndSizeHint(true)
+	xlib.MoveWindow(display, wnd, windowX.?, windowY.?)
+	xlib.Flush(display)
 
-    prevWindowX = windowX.?
-    prevWindowY = windowY.?
-    prevWindowWidth = windowWidth.?
-    prevWindowHeight = windowHeight.?
+	prevWindowX = windowX.?
+	prevWindowY = windowY.?
+	prevWindowWidth = windowWidth.?
+	prevWindowHeight = windowHeight.?
 
-    if screenMode != .window {
-        monitor := linuxGetMonitorFromWindow()
+	if screenMode != .window {
+		monitor := linuxGetMonitorFromWindow()
 
-        linuxSendFullScreenEvent(true)
+		linuxSendFullScreenEvent(true)
 
-        xlib.MoveResizeWindow(display, wnd, monitor.rect.x, monitor.rect.y, u32(monitor.rect.width), u32(monitor.rect.height))
+		xlib.MoveResizeWindow(
+			display,
+			wnd,
+			monitor.rect.x,
+			monitor.rect.y,
+			u32(monitor.rect.width),
+			u32(monitor.rect.height),
+		)
 
-        linuxSetFullScreenVulKan()
-    }
+		linuxSetFullScreenVulKan()
+	}
+	createRenderFuncThread()
+}
+vulkanLinuxStart :: proc(surface: ^vk.SurfaceKHR) {
+	if surface != nil do vk.DestroySurfaceKHR(vkInstance, surface^, nil)
+	xlibSurfaceCreateInfo: VkXlibSurfaceCreateInfoKHR = {
+		window = wnd,
+		dpy    = display,
+		sType  = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR,
+		pNext  = nil,
+		flags  = 0,
+	}
+	surface_: vk.SurfaceKHR
+	res := vkCreateXlibSurfaceKHR(vkInstance, &xlibSurfaceCreateInfo, nil, &surface_)
+	if (res != .SUCCESS) do panicLog(res)
+	surface^ = surface_
 }
