@@ -235,8 +235,6 @@ vkDefaultPipelineDynamicStateCreateInfo := vk.PipelineDynamicStateCreateInfo {
 	}
 }
 
-vkDefaultPipelineRasterizationStateCreateInfo :: proc() -> vk.PipelineRasterizationStateCreateInfo { return vkPipelineRasterizationStateCreateInfoInit() }
-
 @(require_results) vkPipelineRasterizationStateCreateInfoInit ::  proc(
 	polygonMode:             vk.PolygonMode = vk.PolygonMode.FILL,
 	frontFace:               vk.FrontFace = vk.FrontFace.CLOCKWISE,
@@ -265,5 +263,28 @@ vkDefaultPipelineRasterizationStateCreateInfo :: proc() -> vk.PipelineRasterizat
 		lineWidth = lineWidth,
 		pNext = pNext,
 		flags = flags,
+	}
+}
+
+@(require_results) vkPipelineMultisampleStateCreateInfoInit ::  proc(
+	rasterizationSamples:  vk.SampleCountFlags,
+	sampleShadingEnable:   b32,
+	minSampleShading:      f32,
+	pSampleMask:           ^vk.SampleMask,
+	alphaToCoverageEnable: b32,
+	alphaToOneEnable:      b32,
+    pNext:                 rawptr,
+	flags:                 vk.PipelineMultisampleStateCreateFlags,
+) -> vk.PipelineMultisampleStateCreateInfo {
+	return {
+		sType = vk.StructureType.PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        rasterizationSamples = rasterizationSamples,
+        sampleShadingEnable = sampleShadingEnable,
+        minSampleShading = minSampleShading,
+        pSampleMask = pSampleMask,
+        alphaToCoverageEnable = alphaToCoverageEnable,
+        alphaToOneEnable = alphaToOneEnable,
+        pNext = pNext,
+        flags = flags,
 	}
 }
