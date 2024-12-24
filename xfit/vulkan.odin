@@ -7,6 +7,7 @@ import "core:fmt"
 import "core:math"
 import "core:mem"
 import "core:strings"
+import "core:reflect"
 import "core:sync"
 import vk "vendor:vulkan"
 import "vendor:x11/xlib"
@@ -14,6 +15,7 @@ import "vendor:x11/xlib"
 vkInstance: vk.Instance
 vkDevice: vk.Device
 vkLibrary: dynlib.Library
+vkSwapchain: vk.SwapchainKHR
 
 vkDebugUtilsMessenger: vk.DebugUtilsMessengerEXT
 
@@ -65,11 +67,11 @@ vkDebugCallBack :: proc "system" (
 }
 
 @(rodata)
-DEVICE_EXTENSIONS: [1]cstring = {"VK_KHR_swapchain"}
+DEVICE_EXTENSIONS: [2]cstring = {vk.KHR_SWAPCHAIN_EXTENSION_NAME, vk.EXT_FULL_SCREEN_EXCLUSIVE_EXTENSION_NAME}
 @(rodata)
 INSTANCE_EXTENSIONS: [2]cstring = {
-	"VK_KHR_get_surface_capabilities2",
-	"VK_KHR_portability_enumeration",
+	vk.KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,
+	vk.KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
 }
 @(rodata)
 LAYERS: [1]cstring = {"VK_LAYER_KHRONOS_validation"}
@@ -77,8 +79,9 @@ DEVICE_EXTENSIONS_CHECK: [len(DEVICE_EXTENSIONS)]bool
 INSTANCE_EXTENSIONS_CHECK: [len(INSTANCE_EXTENSIONS)]bool
 LAYERS_CHECK: [len(LAYERS)]bool
 
-validation_layer_support :: proc() -> bool {return LAYERS_CHECK[0]}
-VK_KHR_portability_enumeration_support :: proc() -> bool {return INSTANCE_EXTENSIONS_CHECK[1]}
+validation_layer_support :: #force_inline proc "contextless" () -> bool {return LAYERS_CHECK[0]}
+VK_KHR_portability_enumeration_support :: #force_inline proc "contextless" () -> bool {return INSTANCE_EXTENSIONS_CHECK[1]}
+VK_EXT_full_screen_exclusive_support :: #force_inline proc "contextless" () -> bool {return DEVICE_EXTENSIONS_CHECK[1]}
 
 vkShapeCurveVertShader: vk.ShaderModule
 vkShapeCurveFragShader: vk.ShaderModule
@@ -97,6 +100,57 @@ texShaderStages: [2]vk.PipelineShaderStageCreateInfo
 animateTexShaderStages: [2]vk.PipelineShaderStageCreateInfo
 copyScreenShaderStages: [2]vk.PipelineShaderStageCreateInfo
 
+vkQuadShapeDescriptorSetLayout: vk.DescriptorSetLayout
+vkShapeCurveDescriptorSetLayout: vk.DescriptorSetLayout
+vkTexDescriptorSetLayout: vk.DescriptorSetLayout
+//used animate tex
+vkTexDescriptorSetLayout2: vk.DescriptorSetLayout
+vkAnimateTexDescriptorSetLayout: vk.DescriptorSetLayout
+vkCopyScreenDescriptorSetLayout: vk.DescriptorSetLayout
+
+vkQuadShapePipelineLayout: vk.PipelineLayout
+vkShapeCurvePipelineLayout: vk.PipelineLayout
+vkTexPipelineLayout: vk.PipelineLayout
+vkAnimateTexPipelineLayout: vk.PipelineLayout
+vkCopyScreenPipelineLayout: vk.PipelineLayout
+
+vkQuadShapePipeline: vk.Pipeline
+vkShapeCurvePipeline: vk.Pipeline
+vkTexPipeline: vk.Pipeline
+vkAnimateTexPipeline: vk.Pipeline
+vkCopyScreenPipeline: vk.Pipeline
+
+vkPipelineX4MultisampleStateCreateInfo := vkPipelineMultisampleStateCreateInfoInit({._4})
+@(private="file") __vkColorAlphaBlendingExternalState := [1]vk.PipelineColorBlendAttachmentState{vkPipelineColorBlendAttachmentStateInit(
+	srcColorBlendFactor = vk.BlendFactor.SRC_ALPHA,
+	dstColorBlendFactor = vk.BlendFactor.ONE_MINUS_SRC_ALPHA,
+	colorBlendOp = vk.BlendOp.ADD,
+	srcAlphaBlendFactor = vk.BlendFactor.ONE,
+	dstAlphaBlendFactor = vk.BlendFactor.ONE_MINUS_SRC_ALPHA,
+	alphaBlendOp = vk.BlendOp.ADD,
+)}
+@(private="file") __vkNoBlendingState := [1]vk.PipelineColorBlendAttachmentState{vkPipelineColorBlendAttachmentStateInit(
+	blendEnable = false,
+	srcColorBlendFactor = vk.BlendFactor.ONE,
+	dstColorBlendFactor = vk.BlendFactor.ZERO,
+	colorBlendOp = vk.BlendOp.ADD,
+	srcAlphaBlendFactor = vk.BlendFactor.ONE,
+	dstAlphaBlendFactor = vk.BlendFactor.ZERO,
+	alphaBlendOp = vk.BlendOp.ADD,
+	colorWriteMask = {},
+)}
+@(private="file") __vkCopyBlendingState := [1]vk.PipelineColorBlendAttachmentState{vkPipelineColorBlendAttachmentStateInit(
+	srcColorBlendFactor = vk.BlendFactor.ONE,
+	dstColorBlendFactor = vk.BlendFactor.ONE_MINUS_SRC_ALPHA,
+	colorBlendOp = vk.BlendOp.ADD,
+	srcAlphaBlendFactor = vk.BlendFactor.ZERO,
+	dstAlphaBlendFactor = vk.BlendFactor.ONE,
+	alphaBlendOp = vk.BlendOp.ADD,
+)}
+///https://stackoverflow.com/a/34963588
+vkColorAlphaBlendingExternal := vkPipelineColorBlendStateCreateInfoInit(__vkColorAlphaBlendingExternalState[:1])
+vkNoBlending := vkPipelineColorBlendStateCreateInfoInit(__vkNoBlendingState[:1])
+vkCopyBlending := vkPipelineColorBlendStateCreateInfoInit(__vkNoBlendingState[:1])
 
 vkInitShaderModules :: proc() {
 	vkShapeCurveVertShader = vkCreateShaderModule(#load("shaders/shapeCurveVert.spv"))
@@ -127,20 +181,6 @@ vkCleanShaderModules :: proc() {
 	vk.DestroyShaderModule(vkDevice, vkAnimateTexFragShader, nil)
 	vk.DestroyShaderModule(vkDevice, vkCopyScreenFragShader, nil)
 }
-
-vkQuadShapeDescriptorSetLayout: vk.DescriptorSetLayout
-vkShapeCurveDescriptorSetLayout: vk.DescriptorSetLayout
-vkTexDescriptorSetLayout: vk.DescriptorSetLayout
-//used animate tex
-vkTexDescriptorSetLayout2: vk.DescriptorSetLayout
-vkAnimateTexDescriptorSetLayout: vk.DescriptorSetLayout
-vkCopyScreenDescriptorSetLayout: vk.DescriptorSetLayout
-
-vkQuadShapePipelineLayout: vk.PipelineLayout
-vkShapeCurvePipelineLayout: vk.PipelineLayout
-vkTexPipelineLayout: vk.PipelineLayout
-vkAnimateTexPipelineLayout: vk.PipelineLayout
-vkCopyScreenPipelineLayout: vk.PipelineLayout
 
 vkInitPipelines :: proc() {
 	vkQuadShapeDescriptorSetLayout = vkDescriptorSetLayoutInit(
@@ -213,6 +253,78 @@ vkInitPipelines :: proc() {
 		front = quadStencilOp,
 		back = quadStencilOp,
 	)
+
+	pipelines:[5]vk.Pipeline
+	pipelineCreateInfos:[len(pipelines)]vk.GraphicsPipelineCreateInfo
+
+	pipelineCreateInfos[0] = vkGraphicsPipelineCreateInfoInit(
+		stages = quadShapeShaderStages[:2],
+		layout = vkQuadShapePipelineLayout,
+		renderPass = vkRenderPassSample,
+		pMultisampleState = &vkPipelineX4MultisampleStateCreateInfo,
+		pDepthStencilState = &quadDepthStencilState,
+		pColorBlendState = &vkColorAlphaBlendingExternal,
+	)
+
+	shapeCurveVertexInputBindingDescription := [1]vk.VertexInputBindingDescription{{
+		binding = 0,
+		stride = size_of(f32) * (2 + 3),
+		inputRate = .VERTEX,
+	}}
+
+	shapeCurveVertexInputAttributeDescription := [2]vk.VertexInputAttributeDescription{{
+		location = 0,
+		binding = 0,
+		format = vk.Format.R32G32_SFLOAT,
+		offset = 0,
+	},
+	{
+		location = 1,
+		binding = 0,
+		format = vk.Format.R32G32B32_SFLOAT,
+		offset = size_of(f32) * 2,
+	}}
+	shapeCurveVertexInputState := vkPipelineVertexInputStateCreateInfoInit(shapeCurveVertexInputBindingDescription[:], shapeCurveVertexInputAttributeDescription[:])
+	pipelineCreateInfos[1] = vkGraphicsPipelineCreateInfoInit(
+		stages = shapeCurveShaderStages[:],
+		layout = vkShapeCurvePipelineLayout,
+		renderPass = vkRenderPassSample,
+		pMultisampleState = &vkPipelineX4MultisampleStateCreateInfo,
+		pDepthStencilState = &shapeDepthStencilState,
+		pColorBlendState = &vkNoBlending,
+		pVertexInputState = &shapeCurveVertexInputState,
+	)
+	pipelineCreateInfos[2] = vkGraphicsPipelineCreateInfoInit(
+		stages = texShaderStages[:],
+		layout = vkTexPipelineLayout,
+		renderPass = vkRenderPass,
+		pMultisampleState = &vkDefaultPipelineMultisampleStateCreateInfo,
+		pDepthStencilState = &defaultDepthStencilState,
+		pColorBlendState = &vkDefaultPipelineColorBlendStateCreateInfo,
+	)
+	pipelineCreateInfos[3] = vkGraphicsPipelineCreateInfoInit(
+		stages = animateTexShaderStages[:],
+		layout = vkAnimateTexPipelineLayout,
+		renderPass = vkRenderPass,
+		pMultisampleState = &vkDefaultPipelineMultisampleStateCreateInfo,
+		pDepthStencilState = &defaultDepthStencilState,
+		pColorBlendState = &vkDefaultPipelineColorBlendStateCreateInfo,
+	)
+	pipelineCreateInfos[4] = vkGraphicsPipelineCreateInfoInit(
+		stages = copyScreenShaderStages[:],
+		layout = vkCopyScreenPipelineLayout,
+		renderPass = vkRenderPassCopy,
+		pMultisampleState = &vkDefaultPipelineMultisampleStateCreateInfo,
+		pDepthStencilState = nil,
+		pColorBlendState = &vkCopyBlending,
+	)
+	vk.CreateGraphicsPipelines(vkDevice, 0, len(pipelines), raw_data(pipelineCreateInfos[:]), nil, raw_data(pipelines[:]))
+
+	vkQuadShapePipeline = pipelines[0]
+	vkShapeCurvePipeline = pipelines[1]
+	vkTexPipeline = pipelines[2]
+	vkAnimateTexPipeline = pipelines[3]
+	vkCopyScreenPipeline = pipelines[4]
 }
 
 vkCleanPipelines :: proc() {
@@ -228,7 +340,236 @@ vkCleanPipelines :: proc() {
 	vk.DestroyPipelineLayout(vkDevice, vkTexPipelineLayout, nil)
 	vk.DestroyPipelineLayout(vkDevice, vkAnimateTexPipelineLayout, nil)
 	vk.DestroyPipelineLayout(vkDevice, vkCopyScreenPipelineLayout, nil)
+
+	vk.DestroyPipeline(vkDevice, vkQuadShapePipeline, nil)
+	vk.DestroyPipeline(vkDevice, vkShapeCurvePipeline, nil)
+	vk.DestroyPipeline(vkDevice, vkTexPipeline, nil)
+	vk.DestroyPipeline(vkDevice, vkAnimateTexPipeline, nil)
+	vk.DestroyPipeline(vkDevice, vkCopyScreenPipeline, nil)
 }
+
+getVkFmt :: proc(t:TextureFmt) -> vk.Format {
+	#partial switch(t) {
+		case .Default:
+			if TextureFmt_IsDepth(t) do return getVkFmt(__depthFmt)
+			return vkFmt.format
+		case .R8G8B8A8Unorm:
+			return .R8G8B8A8_UNORM
+		case .B8G8R8A8Unorm:
+			return .B8G8R8A8_UNORM
+		case .D24UnormS8Uint:
+			return .D24_UNORM_S8_UINT
+		case .D16UnormS8Uint:
+			return .D16_UNORM_S8_UINT
+		case .D32SfloatS8Uint:
+			return .D32_SFLOAT_S8_UINT
+	}
+	panicLog("unsupport vk format getVkFmt : ", t)
+	return .R8G8B8A8_UNORM
+}
+
+vkFmts:[]vk.SurfaceFormatKHR
+vkFmt:vk.SurfaceFormatKHR = {
+	format = .UNDEFINED,
+	colorSpace = .SRGB_NONLINEAR
+}
+vkPresentModes:[]vk.PresentModeKHR
+vkPresentMode:vk.PresentModeKHR
+vkSurfaceCap:vk.SurfaceCapabilitiesKHR
+vkExtent:vk.Extent2D
+vkExtent_rotation:vk.Extent2D
+
+vkDepthHasOptimal:=false
+vkDepthHasTransferSrcOptimal:=false
+vkDepthHasTransferDstOptimal:=false
+vkDepthHasSampleOptimal:=false
+
+vkColorHasAttachOptimal:=false
+vkColorHasSampleOptimal:=false
+vkColorHasTransferSrcOptimal:=false
+vkColorHasTransferDstOptimal:=false
+
+initSwapChain :: proc() {
+	fmtCnt:u32
+	vk.GetPhysicalDeviceSurfaceFormatsKHR(vkPhysicalDevice, vkSurface, &fmtCnt, nil)
+	vkFmts = make([]vk.SurfaceFormatKHR, fmtCnt)
+	vk.GetPhysicalDeviceSurfaceFormatsKHR(vkPhysicalDevice, vkSurface, &fmtCnt, raw_data(vkFmts))
+
+	presentModeCnt:u32
+	vk.GetPhysicalDeviceSurfacePresentModesKHR(vkPhysicalDevice, vkSurface, &presentModeCnt, nil)
+	vkPresentModes := make([]vk.PresentModeKHR, presentModeCnt)
+	vk.GetPhysicalDeviceSurfacePresentModesKHR(vkPhysicalDevice, vkSurface, &presentModeCnt, raw_data(vkPresentModes))
+
+	for f in vkFmts {
+		if f.format == .R8G8B8A8_UNORM || f.format == .B8G8R8A8_UNORM {
+			when is_log {
+				printfln("XFIT SYSLOG : vulkan swapchain format : %s, colorspace : %s\n", f.format, f.colorSpace)
+			}
+			vkFmt = f
+			break;
+		}
+	}
+	if vkFmt.format == .UNDEFINED do panicLog("Xfit vulkan unsupported format")
+
+	depthProp:vk.FormatProperties
+	vk.GetPhysicalDeviceFormatProperties(vkPhysicalDevice, .D24_UNORM_S8_UINT, &depthProp)
+	vkDepthHasOptimal := .DEPTH_STENCIL_ATTACHMENT in depthProp.optimalTilingFeatures
+
+	__depthFmt = .D24UnormS8Uint
+	if !vkDepthHasOptimal && .DEPTH_STENCIL_ATTACHMENT in depthProp.linearTilingFeatures {//not support D24_UNORM_S8_UINT
+		vk.GetPhysicalDeviceFormatProperties(vkPhysicalDevice, .D32_SFLOAT_S8_UINT, &depthProp)
+		vkDepthHasOptimal = .DEPTH_STENCIL_ATTACHMENT in depthProp.optimalTilingFeatures
+
+		if !vkDepthHasOptimal && .DEPTH_STENCIL_ATTACHMENT in depthProp.linearTilingFeatures {
+			vk.GetPhysicalDeviceFormatProperties(vkPhysicalDevice, .D16_UNORM_S8_UINT, &depthProp)
+			vkDepthHasOptimal = .DEPTH_STENCIL_ATTACHMENT in depthProp.optimalTilingFeatures
+			__depthFmt = .D16UnormS8Uint
+		} else {
+			__depthFmt = .D32SfloatS8Uint
+		}
+	}
+	vkDepthHasTransferSrcOptimal = .TRANSFER_SRC in depthProp.optimalTilingFeatures
+	vkDepthHasTransferDstOptimal = .TRANSFER_DST in depthProp.optimalTilingFeatures
+	vkDepthHasSampleOptimal = .SAMPLED_IMAGE in depthProp.optimalTilingFeatures
+
+	colorProp:vk.FormatProperties
+	vk.GetPhysicalDeviceFormatProperties(vkPhysicalDevice, vkFmt.format, &colorProp)
+	vkColorHasAttachOptimal = .COLOR_ATTACHMENT in colorProp.optimalTilingFeatures
+	vkColorHasSampleOptimal = .SAMPLED_IMAGE in colorProp.optimalTilingFeatures
+	vkColorHasTransferSrcOptimal =.TRANSFER_SRC in colorProp.optimalTilingFeatures
+	vkColorHasTransferDstOptimal = .TRANSFER_DST in colorProp.optimalTilingFeatures
+
+	when is_log {
+		printfln("XFIT SYSLOG : depth format : %s", __depthFmt)
+		println("XFIT SYSLOG : optimal format supports")
+		printfln("vkDepthHasOptimal : %t", vkDepthHasOptimal)
+		printfln("vkDepthHasTransferSrcOptimal : %t", vkDepthHasTransferSrcOptimal)
+		printfln("vkDepthHasTransferDstOptimal : %t", vkDepthHasTransferDstOptimal)
+		printfln("vkDepthHasSampleOptimal : %t", vkDepthHasSampleOptimal)
+		printfln("vkColorHasAttachOptimal : %t", vkColorHasAttachOptimal)
+		printfln("vkColorHasSampleOptimal : %t", vkColorHasSampleOptimal)
+		printfln("vkColorHasTransferSrcOptimal : %t", vkColorHasTransferSrcOptimal)
+		printfln("vkColorHasTransferDstOptimal : %t", vkColorHasTransferDstOptimal)
+	}
+}
+
+createSwapChainAndImageViews :: proc() {
+	vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(vkPhysicalDevice, vkSurface, &vkSurfaceCap)
+
+	vkExtent = vkSurfaceCap.currentExtent
+	if(vkSurfaceCap.currentExtent.width == max(u32)) {
+		vkSurfaceCap.currentExtent.width = clamp(__windowWidth.?, vkSurfaceCap.minImageExtent.width, vkSurfaceCap.maxImageExtent.width)
+		vkSurfaceCap.currentExtent.height = clamp(__windowHeight.?, vkSurfaceCap.minImageExtent.height, vkSurfaceCap.maxImageExtent.height)
+	}
+	vkExtent_rotation = vkExtent
+	if is_mobile {
+		if .ROTATE_90 in vkSurfaceCap.currentTransform {
+			vkExtent_rotation.width = vkExtent.height
+			vkExtent_rotation.height = vkExtent.width
+			__screenOrientation = .Landscape90
+		} else if .ROTATE_270 in vkSurfaceCap.currentTransform {
+			vkExtent_rotation.width = vkExtent.height
+			vkExtent_rotation.height = vkExtent.width
+			__screenOrientation = .Landscape270
+		} else if .ROTATE_180 in vkSurfaceCap.currentTransform {
+			__screenOrientation = .Vertical180
+		} else if .IDENTITY in vkSurfaceCap.currentTransform {
+			__screenOrientation = .Vertical360
+		} 
+	}
+
+	vkPresentMode = .FIFO
+	if __vSync == .Double {
+		when is_log {
+			if programStart do println("XFIT SYSLOG : vulkan present mode fifo_khr vsync double")
+		}
+	} else {
+		if __vSync == .Triple {
+			for p in vkPresentModes {
+				if p == .MAILBOX {
+					when is_log {
+						if programStart do println("XFIT SYSLOG : vulkan present mode mailbox_khr vsync triple")
+					}
+					vkPresentMode = p
+					break;
+				}
+			}
+		}
+		for p in vkPresentModes {
+			if p == .IMMEDIATE {
+				when is_log {
+					if programStart {
+						if __vSync == .Triple do println("XFIT SYSLOG : vulkan present mode immediate_khr mailbox_khr instead(vsync triple -> none)")
+						else do println("XFIT SYSLOG : vulkan present mode immediate_khr vsync none")
+					} 
+				}
+				vkPresentMode = p
+				break;
+			}
+		}
+	}
+
+	surfaceImgCnt := max(__swapImgCnt ,vkSurfaceCap.minImageCount)
+	if vkSurfaceCap.maxImageCount > 0 && surfaceImgCnt > vkSurfaceCap.maxImageCount {//0 is no limit max+
+		surfaceImgCnt = vkSurfaceCap.maxImageCount
+	}
+	__swapImgCnt = surfaceImgCnt
+
+	swapChainCreateInfo := vk.SwapchainCreateInfoKHR{
+		sType = vk.StructureType.SWAPCHAIN_CREATE_INFO_KHR,
+		minImageCount = __swapImgCnt,
+		imageFormat = vkFmt.format,
+		imageColorSpace = vkFmt.colorSpace,
+		imageExtent = vkExtent_rotation,
+		imageArrayLayers = 1,
+		imageUsage = {.COLOR_ATTACHMENT},
+		presentMode = vkPresentMode,
+		preTransform = vkSurfaceCap.currentTransform,
+		compositeAlpha = vkSurfaceCap.supportedCompositeAlpha,
+		clipped = true,
+		oldSwapchain = 0,
+		imageSharingMode = .EXCLUSIVE,
+		pNext = nil,
+		queueFamilyIndexCount = 0,
+		surface = vkSurface
+	}
+	when ODIN_OS == .Windows {
+		if __isFullScreenEx && VK_EXT_full_screen_exclusive_support {
+			fullScreenWinInfo : vk.SurfaceFullScreenExclusiveWin32InfoEXT
+			fullScreenInfo := vk.SurfaceFullScreenExclusiveInfoEXT{
+				sType = vk.StructureType.SURFACE_FULL_SCREEN_EXCLUSIVE_INFO_EXT,
+				pNext = nil,
+				fullScreenExclusive = .APPLICATION_CONTROLLED,
+			}
+			if currentMonitor != nil {
+				fullScreenWinInfo = vk.SurfaceFullScreenExclusiveWin32InfoEXT{
+					sType = vk.StructureType.SURFACE_FULL_SCREEN_EXCLUSIVE_WIN32_INFO_EXT,
+					pNext = nil,
+					hMonitor = currentMonitor.__windows.hmonitor,
+				}
+				fullScreenInfo.pNext = &fullScreenWinInfo
+			}
+			swapChainCreateInfo.pNext = &fullScreenInfo
+		}
+	}
+	queueFamiliesIndices := [2]u32{vkGraphicsFamilyIndex, vkPresentFamilyIndex}
+	if vkGraphicsFamilyIndex != vkPresentFamilyIndex {
+		swapChainCreateInfo.imageSharingMode = .CONCURRENT
+		swapChainCreateInfo.queueFamilyIndexCount = 2
+		swapChainCreateInfo.pQueueFamilyIndices = raw_data(queueFamiliesIndices[:])
+	}
+
+	res := vk.CreateSwapchainKHR(vkDevice, &swapChainCreateInfo, nil, &vkSwapchain)
+	if res != .SUCCESS do panicLog("res = vk.CreateSwapchainKHR(vkDevice, &swapChainCreateInfo, nil, &vkSwapchain) : ", res)
+
+	vk.GetSwapchainImagesKHR(vkDevice, vkSwapchain, &__swapImgCnt, nil)
+	swapImgs:= make([]vk.Image, __swapImgCnt, context.temp_allocator)
+	defer delete(swapImgs, context.temp_allocator)
+
+	for img, i in swapImgs {
+		
+	}
+} 
 
 vulkanStart :: proc() {
 	ok: bool
@@ -261,9 +602,9 @@ vulkanStart :: proc() {
 		appInfo.apiVersion = vk.API_VERSION_1_0
 	}
 
-	instanceExtNames: [dynamic]cstring
+	instanceExtNames := make([dynamic]cstring, 0, len(INSTANCE_EXTENSIONS) + 3, context.temp_allocator)
 	defer delete(instanceExtNames)
-	layerNames: [dynamic]cstring
+	layerNames := make([dynamic]cstring, 0, len(LAYERS), context.temp_allocator)
 	defer delete(layerNames)
 
 	append(&instanceExtNames, vk.KHR_SURFACE_EXTENSION_NAME)
@@ -271,15 +612,15 @@ vulkanStart :: proc() {
 	layerPropCnt: u32
 	vk.EnumerateInstanceLayerProperties(&layerPropCnt, nil)
 
-	availableLayers := make([]vk.LayerProperties, layerPropCnt)
-	defer delete(availableLayers)
+	availableLayers := make([]vk.LayerProperties, layerPropCnt, context.temp_allocator)
+	defer delete(availableLayers, context.temp_allocator)
 
 	vk.EnumerateInstanceLayerProperties(&layerPropCnt, &availableLayers[0])
 
 	for &l in availableLayers {
 		for _, i in LAYERS {
 			if !LAYERS_CHECK[i] &&
-			   mem.compare((transmute([^]u8)LAYERS[i])[:len(LAYERS)], l.layerName[:len(LAYERS)]) == 0 {
+			   mem.compare((transmute([^]u8)LAYERS[i])[:len(LAYERS[i])], l.layerName[:len(LAYERS[i])]) == 0 {
 				when !ODIN_DEBUG {
 					if LAYERS[i] == "VK_LAYER_KHRONOS_validation" do continue
 				}
@@ -295,15 +636,15 @@ vulkanStart :: proc() {
 	instanceExtCnt: u32
 	vk.EnumerateInstanceExtensionProperties(nil, &instanceExtCnt, nil)
 
-	availableInstanceExts := make([]vk.ExtensionProperties, instanceExtCnt)
-	defer delete(availableInstanceExts)
+	availableInstanceExts := make([]vk.ExtensionProperties, instanceExtCnt, context.temp_allocator)
+	defer delete(availableInstanceExts, context.temp_allocator)
 
 	vk.EnumerateInstanceExtensionProperties(nil, &instanceExtCnt, &availableInstanceExts[0])
 
 	for &e in availableInstanceExts {
 		for _, i in INSTANCE_EXTENSIONS {
 			if !LAYERS_CHECK[i] &&
-			   mem.compare((transmute([^]u8)INSTANCE_EXTENSIONS[i])[:len(INSTANCE_EXTENSIONS)], e.extensionName[:len(INSTANCE_EXTENSIONS)]) == 0 {
+			   mem.compare((transmute([^]u8)INSTANCE_EXTENSIONS[i])[:len(INSTANCE_EXTENSIONS[i])], e.extensionName[:len(INSTANCE_EXTENSIONS[i])]) == 0 {
 				append(&instanceExtNames, INSTANCE_EXTENSIONS[i])
 				INSTANCE_EXTENSIONS_CHECK[i] = true
 				when is_log do printfln(
@@ -371,15 +712,15 @@ vulkanStart :: proc() {
 
 	physicalDeviceCnt: u32
 	vk.EnumeratePhysicalDevices(vkInstance, &physicalDeviceCnt, nil)
-	vkPhysicalDevices := make([]vk.PhysicalDevice, physicalDeviceCnt)
-	defer delete(vkPhysicalDevices)
+	vkPhysicalDevices := make([]vk.PhysicalDevice, physicalDeviceCnt, context.temp_allocator)
+	defer delete(vkPhysicalDevices, context.temp_allocator)
 	vk.EnumeratePhysicalDevices(vkInstance, &physicalDeviceCnt, &vkPhysicalDevices[0])
 
 	out: for pd in vkPhysicalDevices {
 		queueFamilyPropCnt: u32
 		vk.GetPhysicalDeviceQueueFamilyProperties(pd, &queueFamilyPropCnt, nil)
-		queueFamilies := make([]vk.QueueFamilyProperties, queueFamilyPropCnt)
-		defer delete(queueFamilies)
+		queueFamilies := make([]vk.QueueFamilyProperties, queueFamilyPropCnt, context.temp_allocator)
+		defer delete(queueFamilies, context.temp_allocator)
 		vk.GetPhysicalDeviceQueueFamilyProperties(pd, &queueFamilyPropCnt, &queueFamilies[0])
 
 		for i in 0 ..< queueFamilyPropCnt {
@@ -419,18 +760,18 @@ vulkanStart :: proc() {
 
 	deviceExtCnt: u32
 	vk.EnumerateDeviceExtensionProperties(vkPhysicalDevice, nil, &deviceExtCnt, nil)
-	deviceExts := make([]vk.ExtensionProperties, deviceExtCnt)
-	defer delete(deviceExts)
+	deviceExts := make([]vk.ExtensionProperties, deviceExtCnt, context.temp_allocator)
+	defer delete(deviceExts, context.temp_allocator)
 	vk.EnumerateDeviceExtensionProperties(vkPhysicalDevice, nil, &deviceExtCnt, &deviceExts[0])
 
-	deviceExtNames: [dynamic]cstring
+	deviceExtNames := make([dynamic]cstring, 0, len(DEVICE_EXTENSIONS) + 1, context.temp_allocator)
 	defer delete(deviceExtNames)
 	append(&deviceExtNames, vk.KHR_SWAPCHAIN_EXTENSION_NAME)
 
 	for &e in deviceExts {
 		for _, i in DEVICE_EXTENSIONS {
 			if !DEVICE_EXTENSIONS_CHECK[i] &&
-			   mem.compare((transmute([^]u8)DEVICE_EXTENSIONS[i])[:len(DEVICE_EXTENSIONS)],e.extensionName[:len(DEVICE_EXTENSIONS)]) == 0 {
+			   mem.compare((transmute([^]u8)DEVICE_EXTENSIONS[i])[:len(DEVICE_EXTENSIONS[i])],e.extensionName[:len(DEVICE_EXTENSIONS[i])]) == 0 {
 				append(&instanceExtNames, DEVICE_EXTENSIONS[i])
 				DEVICE_EXTENSIONS_CHECK[i] = true
 				when is_log do printfln(
@@ -467,7 +808,8 @@ vulkanStart :: proc() {
 	vkInitBlockLen()
 	vkAllocatorInit()
 
-	createSwapChainAndImageViews(true)
+	initSwapChain()
+	createSwapChainAndImageViews()
 
 	samplerInfo := vk.SamplerCreateInfo {
 		sType                   = vk.StructureType.SAMPLER_CREATE_INFO,
@@ -493,8 +835,9 @@ vulkanStart :: proc() {
 	samplerInfo.minFilter = .NEAREST
 	vk.CreateSampler(vkDevice, &samplerInfo, nil, &vkNearestSampler)
 
+	vkDepthFmt := getVkFmt(__depthFmt)
 	depthAttachmentSample := vkAttachmentDescriptionInit(
-		format = .D24_UNORM_S8_UINT,
+		format = vkDepthFmt,
 		loadOp = .LOAD,
 		storeOp = .STORE,
 		stencilLoadOp = .CLEAR,
@@ -504,21 +847,21 @@ vulkanStart :: proc() {
 		samples = {vk.SampleCountFlag._4},
 	)
 	depthAttachmentSampleClear := vkAttachmentDescriptionInit(
-		format = .D24_UNORM_S8_UINT,
+		format = vkDepthFmt,
 		loadOp = .CLEAR,
 		storeOp = .STORE,
 		finalLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
 		samples = {vk.SampleCountFlag._4},
 	)
 	colorAttachmentSampleClear := vkAttachmentDescriptionInit(
-		format = .R8G8B8A8_UNORM,
+		format = vkFmt.format,
 		loadOp = .CLEAR,
 		storeOp = .STORE,
 		finalLayout = .COLOR_ATTACHMENT_OPTIMAL,
 		samples = {vk.SampleCountFlag._4},
 	)
 	colorAttachmentSample := vkAttachmentDescriptionInit(
-		format = .R8G8B8A8_UNORM,
+		format = vkFmt.format,
 		loadOp = .LOAD,
 		storeOp = .STORE,
 		initialLayout = .COLOR_ATTACHMENT_OPTIMAL,
@@ -526,37 +869,37 @@ vulkanStart :: proc() {
 		samples = {vk.SampleCountFlag._4},
 	)
 	colorAttachmentResolve := vkAttachmentDescriptionInit(
-		format = .R8G8B8A8_UNORM,
+		format = vkFmt.format,
 		storeOp = .STORE,
 		finalLayout = .COLOR_ATTACHMENT_OPTIMAL,
 	)
 	colorAttachmentLoadResolve := vkAttachmentDescriptionInit(
-		format = .R8G8B8A8_UNORM,
+		format = vkFmt.format,
 		loadOp = .LOAD,
 		initialLayout = .COLOR_ATTACHMENT_OPTIMAL,
 		finalLayout = .COLOR_ATTACHMENT_OPTIMAL,
 	)
 	colorAttachmentClear := vkAttachmentDescriptionInit(
-		format = .R8G8B8A8_UNORM,
+		format = vkFmt.format,
 		loadOp = .CLEAR,
 		storeOp = .STORE,
 		finalLayout = .PRESENT_SRC_KHR,
 	)
 	depthAttachmentClear := vkAttachmentDescriptionInit(
-		format = .D24_UNORM_S8_UINT,
+		format = vkDepthFmt,
 		loadOp = .CLEAR,
 		storeOp = .STORE,
 		finalLayout = .PRESENT_SRC_KHR,
 	)
 	colorAttachment := vkAttachmentDescriptionInit(
-		format = .R8G8B8A8_UNORM,
+		format = vkFmt.format,
 		loadOp = .LOAD,
 		storeOp = .STORE,
 		initialLayout = .PRESENT_SRC_KHR,
 		finalLayout = .PRESENT_SRC_KHR,
 	)
 	depthAttachment := vkAttachmentDescriptionInit(
-		format = .D24_UNORM_S8_UINT,
+		format = vkDepthFmt,
 		loadOp = .LOAD,
 		storeOp = .STORE,
 		initialLayout = .PRESENT_SRC_KHR,

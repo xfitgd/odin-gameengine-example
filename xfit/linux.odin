@@ -49,7 +49,7 @@ systemLinuxStart :: proc() {
 			&monitors,
 			monitorInfo {
 				isPrimary = i == i32(defScreenIdx),
-				rect = xmath.rectInit(
+				rect = xmath.Rect_Init(
 					[2]i32{crtc_info.x, crtc_info.y},
 					[2]i32{i32(crtc_info.width), i32(crtc_info.height)},
 				),
@@ -95,9 +95,9 @@ setWndSizeHint :: proc(first_call: bool) {
 
 }
 
-linuxGetMonitorFromWindow :: proc() -> ^monitorInfo {
+linuxGetMonitorFromWindow :: proc() -> ^monitorInfo #no_bounds_check {
 	for &value in monitors {
-		if xmath.rectPointIn(value.rect, [2]i32{windowX.?, windowY.?}) do return &value
+		if xmath.Rect_PointIn(value.rect, [2]i32{__windowX.?, __windowY.?}) do return &value
 	}
 	return primaryMonitor
 }
@@ -120,28 +120,29 @@ linuxSendFullScreenEvent :: proc(toggle: bool) {
 		&evt,
 	)
 }
-linuxSetFullScreenVulKan :: proc() {
-	if screenMode == .fullscreen {
-		//TODO vulkan
-	}
-}
+//!not support fullscreen exclusive linux
+// linuxSetFullScreenVulKan :: proc() {
+// 	if __screenMode == .Fullscreen {
+// 		//vulkan
+// 	}
+// }
 
 linuxStart :: proc() {
-	if screenIdx > len(monitors) - 1 do screenIdx = defScreenIdx
-	monitors[screenIdx].rect.x = 0
+	if __screenIdx > len(monitors) - 1 do __screenIdx = defScreenIdx
+	monitors[__screenIdx].rect.x = 0
 
-	if windowWidth == nil do windowWidth = u32(monitors[screenIdx].rect.width / 2)
-	if windowHeight == nil do windowHeight = u32(monitors[screenIdx].rect.height / 2)
-	if windowX == nil do windowX = i32(monitors[screenIdx].rect.x + monitors[screenIdx].rect.width / 4)
-	if windowY == nil do windowY = i32(monitors[screenIdx].rect.y + monitors[screenIdx].rect.height / 4)
+	if __windowWidth == nil do __windowWidth = u32(monitors[__screenIdx].rect.width / 2)
+	if __windowHeight == nil do __windowHeight = u32(monitors[__screenIdx].rect.height / 2)
+	if __windowX == nil do __windowX = i32(monitors[__screenIdx].rect.x + monitors[__screenIdx].rect.width / 4)
+	if __windowY == nil do __windowY = i32(monitors[__screenIdx].rect.y + monitors[__screenIdx].rect.height / 4)
 
 	wnd = xlib.CreateWindow(
 		display,
 		rootWnd,
-		windowX.?,
-		windowY.?,
-		windowWidth.?,
-		windowHeight.?,
+		__windowX.?,
+		__windowY.?,
+		__windowWidth.?,
+		__windowHeight.?,
 		0,
 		xlib.CopyFromParent,
 		xlib.WindowClass.InputOutput,
@@ -199,15 +200,15 @@ linuxStart :: proc() {
 	xlib.SetWMProtocols(display, wnd, &delWnd, 1)
 
 	setWndSizeHint(true)
-	xlib.MoveWindow(display, wnd, windowX.?, windowY.?)
+	xlib.MoveWindow(display, wnd, __windowX.?, __windowY.?)
 	xlib.Flush(display)
 
-	prevWindowX = windowX.?
-	prevWindowY = windowY.?
-	prevWindowWidth = windowWidth.?
-	prevWindowHeight = windowHeight.?
+	prevWindowX = __windowX.?
+	prevWindowY = __windowY.?
+	prevWindowWidth = __windowWidth.?
+	prevWindowHeight = __windowHeight.?
 
-	if screenMode != .window {
+	if __screenMode != .Window {
 		monitor := linuxGetMonitorFromWindow()
 
 		linuxSendFullScreenEvent(true)
@@ -221,7 +222,7 @@ linuxStart :: proc() {
 			u32(monitor.rect.height),
 		)
 
-		linuxSetFullScreenVulKan()
+		//!linuxSetFullScreenVulKan()
 	}
 	createRenderFuncThread()
 }

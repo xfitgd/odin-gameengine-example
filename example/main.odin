@@ -17,5 +17,7 @@ Init ::proc() {
 // }
 
 main :: proc() {
-    xfit.XfitMain(Init)
+    xfit.xfitInit()
+
+    xfit.xfitMain(Init)
 }

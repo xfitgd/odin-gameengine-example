@@ -26,6 +26,22 @@ VkXlibSurfaceCreateInfoKHR :: struct {
 	window: xlib.Window,
 }
 
+@(rodata) vkDefaultDynamicStates := [2]vk.DynamicState{vk.DynamicState.VIEWPORT, vk.DynamicState.SCISSOR}
+vkDefaultPipelineDynamicStateCreateInfo := vk.PipelineDynamicStateCreateInfo {
+	sType             = vk.StructureType.PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+	dynamicStateCount = 2,
+	pDynamicStates    = &vkDefaultDynamicStates[0],
+}
+
+@(private="file") __vkDefaultPipelineColorBlendAttachmentState := [1]vk.PipelineColorBlendAttachmentState{vkPipelineColorBlendAttachmentStateInit()}
+vkDefaultPipelineColorBlendStateCreateInfo := vkPipelineColorBlendStateCreateInfoInit(__vkDefaultPipelineColorBlendAttachmentState[:1])
+
+vkDefaultPipelineMultisampleStateCreateInfo := vkPipelineMultisampleStateCreateInfoInit()
+vkDefaultPipelineInputAssemblyStateCreateInfo := vkPipelineInputAssemblyStateCreateInfoInit()
+vkDefaultPipelineRasterizationStateCreateInfo := vkPipelineRasterizationStateCreateInfoInit()
+vkDefaultPipelineVertexInputStateCreateInfo := vkPipelineVertexInputStateCreateInfoInit()
+vkDefaultPipelineDepthStencilStateCreateInfo := vkPipelineDepthStencilStateCreateInfoInit()
+
 
 @(require_results) vkCreateShaderModule :: proc(code: []u8) -> vk.ShaderModule {
 	code_ := transmute([]u32)code
@@ -41,7 +57,7 @@ VkXlibSurfaceCreateInfoKHR :: struct {
 	return shaderModule
 }
 
-@(require_results) vkCreateShaderStages :: proc(
+@(require_results) vkCreateShaderStages :: proc "contextless" (
 	vertModule: vk.ShaderModule,
 	fragModule: vk.ShaderModule,
 ) -> [2]vk.PipelineShaderStageCreateInfo {
@@ -61,7 +77,7 @@ VkXlibSurfaceCreateInfoKHR :: struct {
 	}
 }
 
-@(require_results) vkDescriptorSetLayoutBindingInit :: proc(
+@(require_results) vkDescriptorSetLayoutBindingInit :: proc "contextless"(
 	binding: u32,
 	descriptorCount: u32,
 	descriptorType: vk.DescriptorType = .UNIFORM_BUFFER,
@@ -77,7 +93,7 @@ VkXlibSurfaceCreateInfoKHR :: struct {
 	}
 }
 
-@(require_results) vkDescriptorSetLayoutInit :: proc(
+@(require_results) vkDescriptorSetLayoutInit :: proc "contextless"(
 	bindings: []vk.DescriptorSetLayoutBinding,
 ) -> vk.DescriptorSetLayout {
 	setLayoutInfo := vk.DescriptorSetLayoutCreateInfo {
@@ -92,7 +108,7 @@ VkXlibSurfaceCreateInfoKHR :: struct {
 }
 
 
-@(require_results) vkPipelineLayoutInit :: proc(sets: []vk.DescriptorSetLayout) -> vk.PipelineLayout {
+@(require_results) vkPipelineLayoutInit :: proc "contextless"(sets: []vk.DescriptorSetLayout) -> vk.PipelineLayout {
 	pipelineLayoutInfo := vk.PipelineLayoutCreateInfo {
 		setLayoutCount = auto_cast len(sets),
 		pSetLayouts    = raw_data(sets),
@@ -104,7 +120,7 @@ VkXlibSurfaceCreateInfoKHR :: struct {
 	return pipelineLayout
 }
 
-@(require_results) vkStencilOpStateInit :: proc(
+@(require_results) vkStencilOpStateInit :: proc "contextless"(
 	compareOp: vk.CompareOp,
 	depthFailOp: vk.StencilOp,
 	passOp: vk.StencilOp,
@@ -124,7 +140,7 @@ VkXlibSurfaceCreateInfoKHR :: struct {
 	}
 }
 
-@(require_results) vkPipelineDepthStencilStateCreateInfoInit :: proc(
+@(require_results) vkPipelineDepthStencilStateCreateInfoInit :: proc "contextless"(
 	depthTestEnable: b32 = true,
 	depthWriteEnable: b32 = true,
 	depthBoundsTestEnable: b32 = false,
@@ -149,14 +165,7 @@ VkXlibSurfaceCreateInfoKHR :: struct {
 	}
 }
 
-@(rodata) vkDefaultDynamicStates := [2]vk.DynamicState{vk.DynamicState.VIEWPORT, vk.DynamicState.SCISSOR}
-vkDefaultPipelineDynamicStateCreateInfo := vk.PipelineDynamicStateCreateInfo {
-	sType             = vk.StructureType.PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-	dynamicStateCount = 2,
-	pDynamicStates    = &vkDefaultDynamicStates[0],
-}
-
-@(require_results) vkPipelineInputAssemblyStateCreateInfoInit :: proc(
+@(require_results) vkPipelineInputAssemblyStateCreateInfoInit :: proc "contextless"(
 	topology: vk.PrimitiveTopology =  vk.PrimitiveTopology.TRIANGLE_LIST,
 	primitiveRestartEnable: b32 = false,
 	pNext: rawptr = nil,
@@ -169,7 +178,7 @@ vkDefaultPipelineDynamicStateCreateInfo := vk.PipelineDynamicStateCreateInfo {
 	}
 }
 
-@(require_results) vkPipelineViewportStateCreateInfoInit :: proc(
+@(require_results) vkPipelineViewportStateCreateInfoInit :: proc "contextless"(
 	viewportCount: u32 = 1,
 	pViewports:    [^]vk.Viewport = nil,
 	scissorCount:  u32 = 1,
@@ -188,18 +197,30 @@ vkDefaultPipelineDynamicStateCreateInfo := vk.PipelineDynamicStateCreateInfo {
 	}
 }
 
-@(private="file") __vkDefaultPipelineColorBlendAttachmentState := [1]vk.PipelineColorBlendAttachmentState{vkPipelineColorBlendAttachmentStateInit()}
-vkDefaultPipelineColorBlendStateCreateInfo := vkPipelineColorBlendStateCreateInfoInit(__vkDefaultPipelineColorBlendAttachmentState[:1])
+@(require_results) vkPipelineVertexInputStateCreateInfoInit :: proc "contextless"(
+	pVertexBindingDescriptions:Maybe([]vk.VertexInputBindingDescription) = nil,
+	pVertexAttributeDescriptions:Maybe([]vk.VertexInputAttributeDescription) = nil,
+	flags:         vk.PipelineVertexInputStateCreateFlags = {},
+	pNext:         rawptr = nil,
+) -> vk.PipelineVertexInputStateCreateInfo {
+	return {
+		sType = vk.StructureType.PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+		vertexBindingDescriptionCount = 0 if pVertexBindingDescriptions == nil else auto_cast len(pVertexBindingDescriptions.?),
+		pVertexBindingDescriptions = raw_data(pVertexBindingDescriptions.?) if pVertexBindingDescriptions != nil && len(pVertexBindingDescriptions.?) > 0 else nil,
+		vertexAttributeDescriptionCount = 0 if pVertexAttributeDescriptions == nil else auto_cast len(pVertexAttributeDescriptions.?),
+		pVertexAttributeDescriptions = raw_data(pVertexAttributeDescriptions.?) if pVertexAttributeDescriptions != nil && len(pVertexAttributeDescriptions.?) > 0 else nil,
+		flags = flags,
+		pNext = pNext,
+	}
+}
 
-vkDefaultPipelineMultisampleStateCreateInfo := vkPipelineMultisampleStateCreateInfoInit()
-vkDefaultPipelineInputAssemblyStateCreateInfo := vkPipelineInputAssemblyStateCreateInfoInit()
-vkDefaultPipelineRasterizationStateCreateInfo := vkPipelineRasterizationStateCreateInfoInit()
 
-@(require_results) vkGraphicsPipelineCreateInfoInit :: proc(
+
+@(require_results) vkGraphicsPipelineCreateInfoInit :: proc "contextless"(
 	stages: []vk.PipelineShaderStageCreateInfo,
 	layout: vk.PipelineLayout,
 	renderPass: vk.RenderPass,
-	pVertexInputState: ^vk.PipelineVertexInputStateCreateInfo,
+	pVertexInputState: ^vk.PipelineVertexInputStateCreateInfo = nil,
 	pInputAssemblyState: ^vk.PipelineInputAssemblyStateCreateInfo = nil,
 	pTessellationState: ^vk.PipelineTessellationStateCreateInfo = nil,
 	pViewportState: ^vk.PipelineViewportStateCreateInfo = nil,
@@ -215,7 +236,7 @@ vkDefaultPipelineRasterizationStateCreateInfo := vkPipelineRasterizationStateCre
 	return {
 		stageCount = auto_cast len(stages),
 		pStages = raw_data(stages),
-		pVertexInputState = pVertexInputState,
+		pVertexInputState = pVertexInputState if pVertexInputState != nil else &vkDefaultPipelineVertexInputStateCreateInfo,
 		pInputAssemblyState = pInputAssemblyState if pInputAssemblyState != nil else &vkDefaultPipelineInputAssemblyStateCreateInfo,
 		pTessellationState = pTessellationState,
 		pViewportState = pViewportState if pViewportState != nil else nil,
@@ -235,7 +256,7 @@ vkDefaultPipelineRasterizationStateCreateInfo := vkPipelineRasterizationStateCre
 	}
 }
 
-@(require_results) vkAttachmentDescriptionInit :: proc(
+@(require_results) vkAttachmentDescriptionInit :: proc "contextless"(
 	format: vk.Format,
 	loadOp: vk.AttachmentLoadOp = .DONT_CARE,
 	storeOp: vk.AttachmentStoreOp = .DONT_CARE,
@@ -257,7 +278,7 @@ vkDefaultPipelineRasterizationStateCreateInfo := vkPipelineRasterizationStateCre
 	}
 }
 
-@(require_results) vkRenderPassCreateInfoInit :: proc(
+@(require_results) vkRenderPassCreateInfoInit :: proc "contextless"(
 	pAttachments: []vk.AttachmentDescription,
 	pSubpasses: []vk.SubpassDescription,
 	pDependencies: []vk.SubpassDependency,
@@ -273,7 +294,7 @@ vkDefaultPipelineRasterizationStateCreateInfo := vkPipelineRasterizationStateCre
 	}
 }
 
-@(require_results) vkPipelineRasterizationStateCreateInfoInit ::  proc(
+@(require_results) vkPipelineRasterizationStateCreateInfoInit :: proc "contextless"(
 	polygonMode:             vk.PolygonMode = vk.PolygonMode.FILL,
 	frontFace:               vk.FrontFace = vk.FrontFace.CLOCKWISE,
 	cullMode:                vk.CullModeFlags = {},
@@ -304,7 +325,7 @@ vkDefaultPipelineRasterizationStateCreateInfo := vkPipelineRasterizationStateCre
 	}
 }
 
-@(require_results) vkPipelineMultisampleStateCreateInfoInit ::  proc(
+@(require_results) vkPipelineMultisampleStateCreateInfoInit :: proc "contextless"(
 	rasterizationSamples:  vk.SampleCountFlags = {._1},
 	sampleShadingEnable:   b32 = true,
 	minSampleShading:      f32 = 0,
@@ -327,7 +348,7 @@ vkDefaultPipelineRasterizationStateCreateInfo := vkPipelineRasterizationStateCre
 	}
 }
 
-@(require_results) vkPipelineColorBlendAttachmentStateInit ::  proc(
+@(require_results) vkPipelineColorBlendAttachmentStateInit :: proc "contextless"(
 	blendEnable:         b32 = true,
 	srcColorBlendFactor: vk.BlendFactor = vk.BlendFactor.SRC_ALPHA,
 	dstColorBlendFactor: vk.BlendFactor = vk.BlendFactor.ONE_MINUS_SRC_ALPHA,
@@ -349,7 +370,7 @@ vkDefaultPipelineRasterizationStateCreateInfo := vkPipelineRasterizationStateCre
 	}
 }
 
-@(require_results) vkPipelineColorBlendStateCreateInfoInit ::  proc(
+@(require_results) vkPipelineColorBlendStateCreateInfoInit :: proc "contextless"(
 	pAttachments:    []vk.PipelineColorBlendAttachmentState,
 	logicOpEnable:   b32 = false,
 	logicOp:         vk.LogicOp = vk.LogicOp.COPY,
