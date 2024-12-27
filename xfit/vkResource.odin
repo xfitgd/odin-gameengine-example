@@ -13,6 +13,24 @@ VkSize :: vk.DeviceSize
 
 VkResourceRange :: rawptr
 
+VkDescriptorType :: enum {
+    SAMPLER,  //vk.DescriptorType.SAMPLER
+    UNIFORM,  //vk.DescriptorType.UNIFORM_BUFFER
+}
+VkDescriptorPoolSize :: struct {type:VkDescriptorType, cnt:u32}
+VkDescriptorPoolMem :: struct {pool:vk.DescriptorPool, cnt:u32}
+
+VK_MAX_RESOURCES_FROM_DESCRIPTOR_SET :: 5
+
+VkDescriptorSet :: struct {
+    layout: vk.DescriptorSetLayout,
+    ///created inside update_descriptor_sets call
+    __set: vk.DescriptorSet,
+    size: []VkDescriptorPoolSize,
+    bindings: []u32,
+    __resources: [VK_MAX_RESOURCES_FROM_DESCRIPTOR_SET]^VkBaseResource,
+};
+
 TextureType :: enum {
     TEX2D,
     TEX2DARRAY,
@@ -67,17 +85,13 @@ VkBaseResource :: struct {
 VkBufferResource :: struct {
     using _:VkBaseResource,
     option:BufferCreateOption,
+    __resource:vk.Buffer,
 }
 VkTextureResource :: struct {
     using _:VkBaseResource,
     imgView:vk.ImageView,
     sampler:vk.Sampler,
     option:TextureCreateOption,
+    __resource:vk.Image,
 }
 
-VkDescriptorType :: enum {
-    SAMPLER,  //vk.DescriptorType.SAMPLER
-    UNIFORM,  //vk.DescriptorType.UNIFORM_BUFFER
-}
-VkDescriptorPoolSize :: struct {type:VkDescriptorType, cnt:u32}
-VkDescriptorPoolMem :: struct {pool:vk.DescriptorPool, cnt:u32}

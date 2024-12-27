@@ -43,7 +43,7 @@ vkDefaultPipelineVertexInputStateCreateInfo := vkPipelineVertexInputStateCreateI
 vkDefaultPipelineDepthStencilStateCreateInfo := vkPipelineDepthStencilStateCreateInfoInit()
 
 
-@(require_results) vkCreateShaderModule :: proc(code: []u8) -> vk.ShaderModule {
+@(require_results) vkCreateShaderModule :: proc(code: []byte) -> vk.ShaderModule {
 	code_ := transmute([]u32)code
 	createInfo := vk.ShaderModuleCreateInfo {
 		codeSize = len(code_),

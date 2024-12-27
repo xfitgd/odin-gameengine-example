@@ -15,6 +15,9 @@ Init ::proc() {
 // Destroy ::proc() {
     
 // }
+AfterDestroy ::proc() {
+    
+}
 
 main :: proc() {
     xfit.xfitInit()

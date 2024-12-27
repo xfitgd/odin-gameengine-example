@@ -620,7 +620,7 @@ vulkanStart :: proc() {
 	for &l in availableLayers {
 		for _, i in LAYERS {
 			if !LAYERS_CHECK[i] &&
-			   mem.compare((transmute([^]u8)LAYERS[i])[:len(LAYERS[i])], l.layerName[:len(LAYERS[i])]) == 0 {
+			   mem.compare((transmute([^]byte)LAYERS[i])[:len(LAYERS[i])], l.layerName[:len(LAYERS[i])]) == 0 {
 				when !ODIN_DEBUG {
 					if LAYERS[i] == "VK_LAYER_KHRONOS_validation" do continue
 				}
@@ -644,7 +644,7 @@ vulkanStart :: proc() {
 	for &e in availableInstanceExts {
 		for _, i in INSTANCE_EXTENSIONS {
 			if !LAYERS_CHECK[i] &&
-			   mem.compare((transmute([^]u8)INSTANCE_EXTENSIONS[i])[:len(INSTANCE_EXTENSIONS[i])], e.extensionName[:len(INSTANCE_EXTENSIONS[i])]) == 0 {
+			   mem.compare((transmute([^]byte)INSTANCE_EXTENSIONS[i])[:len(INSTANCE_EXTENSIONS[i])], e.extensionName[:len(INSTANCE_EXTENSIONS[i])]) == 0 {
 				append(&instanceExtNames, INSTANCE_EXTENSIONS[i])
 				INSTANCE_EXTENSIONS_CHECK[i] = true
 				when is_log do printfln(
@@ -771,7 +771,7 @@ vulkanStart :: proc() {
 	for &e in deviceExts {
 		for _, i in DEVICE_EXTENSIONS {
 			if !DEVICE_EXTENSIONS_CHECK[i] &&
-			   mem.compare((transmute([^]u8)DEVICE_EXTENSIONS[i])[:len(DEVICE_EXTENSIONS[i])],e.extensionName[:len(DEVICE_EXTENSIONS[i])]) == 0 {
+			   mem.compare((transmute([^]byte)DEVICE_EXTENSIONS[i])[:len(DEVICE_EXTENSIONS[i])],e.extensionName[:len(DEVICE_EXTENSIONS[i])]) == 0 {
 				append(&instanceExtNames, DEVICE_EXTENSIONS[i])
 				DEVICE_EXTENSIONS_CHECK[i] = true
 				when is_log do printfln(

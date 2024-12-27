@@ -115,8 +115,7 @@ printTraceBuf :: proc(str:^strings.Builder) {
 	}
 	fmt.sbprintln(str, "-------------------------------------------------\n")
 }
-
-panicLog :: proc(args: ..any, loc := #caller_location) {
+@(cold) panicLog :: proc(args: ..any, loc := #caller_location) {
 	str: strings.Builder
 	strings.builder_init(&str)
 	fmt.sbprintln(&str,..args)
@@ -142,14 +141,13 @@ panicLog :: proc(args: ..any, loc := #caller_location) {
 	panic(str2, loc)
 }
 
-when !is_mobile {
+when is_android {
+	//TODO
+} else {
 	println :: fmt.println
 	printfln :: fmt.printfln
 	printf :: fmt.printf
 	print :: fmt.print
-} else when is_android {
-	//TODO
-} else {
 }
 
 @(private) createRenderFuncThread :: proc() {
