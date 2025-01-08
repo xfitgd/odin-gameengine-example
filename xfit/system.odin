@@ -5,6 +5,8 @@ import "core:fmt"
 import "core:math"
 import "core:math/linalg"
 import "core:os"
+import "core:mem"
+import "core:mem/virtual"
 import "core:io"
 import "core:reflect"
 import "core:thread"
@@ -12,7 +14,6 @@ import "core:sync"
 import "core:strings"
 import "base:runtime"
 import "core:debug/trace"
-import "xmath"
 
 @(private) render_th: ^thread.Thread
 
@@ -30,34 +31,14 @@ Activate: proc() = proc() {}
 @(private) __depthFmt:TextureFmt
 @(private) __swapImgCnt:u32 = 3
 
-TextureFmt :: enum u32 {
-    Default,
-    R8G8B8A8Unorm,
-    B8G8R8A8Unorm,
-    B8G8R8A8Srgb,
-    R8G8B8A8Srgb,
-    D24UnormS8Uint,
-    D32SfloatS8Uint,
-    D16UnormS8Uint,
-}
-
-TextureFmt_IsDepth :: proc(t:TextureFmt) -> bool {
-	#partial switch(t) {
-		case .D24UnormS8Uint, .D32SfloatS8Uint, .D16UnormS8Uint:
-		return true
-	}
-	return false
-}
-
-
 screenInfo :: struct {
 	monitor:     ^monitorInfo,
-	size:        xmath.PointU,
+	size:        PointU,
 	refreshRate: f64,
 }
 
 monitorInfo :: struct {
-	rect:       xmath.RectI,
+	rect:       RectI,
 	resolution: screenInfo,
 	name:       string,
 	__windows:  monitor_info_windows,
@@ -115,7 +96,8 @@ printTraceBuf :: proc(str:^strings.Builder) {
 	}
 	fmt.sbprintln(str, "-------------------------------------------------\n")
 }
-@(cold) panicLog :: proc(args: ..any, loc := #caller_location) {
+@(cold) panicLog :: proc "contextless" (args: ..any, loc := #caller_location) -> ! {
+	context = runtime.default_context()
 	str: strings.Builder
 	strings.builder_init(&str)
 	fmt.sbprintln(&str,..args)

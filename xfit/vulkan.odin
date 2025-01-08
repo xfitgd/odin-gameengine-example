@@ -348,26 +348,6 @@ vkCleanPipelines :: proc() {
 	vk.DestroyPipeline(vkDevice, vkCopyScreenPipeline, nil)
 }
 
-getVkFmt :: proc(t:TextureFmt) -> vk.Format {
-	#partial switch(t) {
-		case .Default:
-			if TextureFmt_IsDepth(t) do return getVkFmt(__depthFmt)
-			return vkFmt.format
-		case .R8G8B8A8Unorm:
-			return .R8G8B8A8_UNORM
-		case .B8G8R8A8Unorm:
-			return .B8G8R8A8_UNORM
-		case .D24UnormS8Uint:
-			return .D24_UNORM_S8_UINT
-		case .D16UnormS8Uint:
-			return .D16_UNORM_S8_UINT
-		case .D32SfloatS8Uint:
-			return .D32_SFLOAT_S8_UINT
-	}
-	panicLog("unsupport vk format getVkFmt : ", t)
-	return .R8G8B8A8_UNORM
-}
-
 vkFmts:[]vk.SurfaceFormatKHR
 vkFmt:vk.SurfaceFormatKHR = {
 	format = .UNDEFINED,
@@ -835,7 +815,7 @@ vulkanStart :: proc() {
 	samplerInfo.minFilter = .NEAREST
 	vk.CreateSampler(vkDevice, &samplerInfo, nil, &vkNearestSampler)
 
-	vkDepthFmt := getVkFmt(__depthFmt)
+	vkDepthFmt := TextureFmtToVkFmt(__depthFmt)
 	depthAttachmentSample := vkAttachmentDescriptionInit(
 		format = vkDepthFmt,
 		loadOp = .LOAD,

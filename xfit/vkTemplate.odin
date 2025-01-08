@@ -389,3 +389,51 @@ vkDefaultPipelineDepthStencilStateCreateInfo := vkPipelineDepthStencilStateCreat
 		blendConstants = blendConstants,
 	}
 }
+
+vkTransitionImageLayout :: proc(cmd:vk.CommandBuffer, image:vk.Image, mipLevels:u32, arrayStart:u32, arrayLayers:u32, oldLayout:vk.ImageLayout, newLayout:vk.ImageLayout) {
+	barrier := vk.ImageMemoryBarrier{
+		sType = vk.StructureType.IMAGE_MEMORY_BARRIER,
+		oldLayout = oldLayout,
+		newLayout = newLayout,
+		srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+		dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+		image = image,
+		subresourceRange = {
+			aspectMask = {.COLOR},
+			baseMipLevel = 0,
+			levelCount = mipLevels,
+			baseArrayLayer = arrayStart,
+			layerCount = arrayLayers
+		}
+	}
+	
+	srcStage : vk.PipelineStageFlags
+	dstStage : vk.PipelineStageFlags
+
+	if oldLayout == .UNDEFINED && newLayout == .TRANSFER_DST_OPTIMAL {
+		barrier.srcAccessMask = {}
+		barrier.dstAccessMask = {.TRANSFER_WRITE}
+
+		srcStage = {.TOP_OF_PIPE}
+		dstStage = {.TRANSFER}
+	} else if oldLayout == .TRANSFER_DST_OPTIMAL && newLayout == .SHADER_READ_ONLY_OPTIMAL {
+		barrier.srcAccessMask = {.TRANSFER_WRITE}
+		barrier.dstAccessMask = {.SHADER_READ}
+
+		srcStage = {.TRANSFER}
+		dstStage = {.FRAGMENT_SHADER}
+	} else {
+		panicLog("unsupported layout transition!", oldLayout, newLayout)
+	}
+
+	vk.CmdPipelineBarrier(cmd,
+	srcStage,
+	dstStage,
+	{},
+	0,
+	nil,
+	0,
+	nil,
+	1,
+	&barrier)
+}

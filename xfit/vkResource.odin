@@ -4,7 +4,6 @@ package xfit
 import vk "vendor:vulkan"
 import "core:mem"
 import "core:container/intrusive/list"
-import "xmath"
 import "core:math"
 import "core:c"
 import "xlist"
@@ -14,7 +13,7 @@ VkSize :: vk.DeviceSize
 VkResourceRange :: rawptr
 
 VkDescriptorType :: enum {
-    SAMPLER,  //vk.DescriptorType.SAMPLER
+    SAMPLER,  //vk.DescriptorType.COMBINED_IMAGE_SAMPLER
     UNIFORM,  //vk.DescriptorType.UNIFORM_BUFFER
 }
 VkDescriptorPoolSize :: struct {type:VkDescriptorType, cnt:u32}
@@ -33,8 +32,7 @@ VkDescriptorSet :: struct {
 
 TextureType :: enum {
     TEX2D,
-    TEX2DARRAY,
-    TEX3D,
+   // TEX3D,
 }
 TextureUsage :: enum {
     IMAGE_RESOURCE,
@@ -46,7 +44,7 @@ TextureUsages :: bit_set[TextureUsage]
 ResourceUsage :: enum {GPU,CPU}
 
 TextureCreateOption :: struct {
-    len:VkSize,
+    len:u32,
     width:u32,
     height:u32,
     type:TextureType,
@@ -95,3 +93,30 @@ VkTextureResource :: struct {
     __resource:vk.Image,
 }
 
+@(require_results) samplesToVkSampleCountFlags :: proc "contextless"(#any_int samples : uint) -> vk.SampleCountFlags {
+    switch samples {
+        case 1: return {._1}
+        case 2: return {._2}
+        case 4: return {._4}
+        case 8: return {._8}
+        case 16: return {._16}
+        case 32: return {._32}
+        case 64: return {._64}
+    }
+    panicLog("unsupport samples samplesToVkSampleCountFlags : ", samples)
+}
+
+@(require_results) TextureTypeToVkImageType :: proc "contextless"(t : TextureType) -> vk.ImageType {
+    switch t {
+        case .TEX2D:return .D2
+    }
+    return .D2
+}
+
+@(require_results) DescriptorTypeToVkDescriptorType :: proc "contextless"(t : VkDescriptorType) -> vk.DescriptorType {
+    switch t {
+        case .SAMPLER : return .COMBINED_IMAGE_SAMPLER
+        case .UNIFORM : return .UNIFORM_BUFFER
+    }
+    return .UNIFORM_BUFFER
+}

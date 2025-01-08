@@ -10,21 +10,23 @@ import "core:sync"
 import "core:thread"
 import vk "vendor:vulkan"
 import "xlist"
-import "xmath"
 
 vkMemBlockLen: VkSize = mem.Megabyte * 256
 vkMemSpcialBlockLen: VkSize = mem.Megabyte * 256
 vkNonCoherentAtomSize: VkSize = 0
+vkPoolBlock: u32 = 256
 vkSupportCacheLocal := false
 vkSupportNonCacheLocal := false
 @(private = "file") __arena: mem.Dynamic_Arena
 @(private = "file") __tempArena: mem.Dynamic_Arena
+@(private = "file") __bufTempArena: mem.Dynamic_Arena
 @(private = "file") __allocArena: mem.Dynamic_Arena
 @(private = "file") __allocArenaMtx: mem.Mutex_Allocator
 @(private = "file") gQueueMtx: sync.Atomic_Mutex
 @(private = "file") gDestroyQueueMtx: sync.Atomic_Mutex
 vkArenaAllocator: mem.Allocator
 vkTempArenaAllocator: mem.Allocator
+vkBufTempArenaAllocator: mem.Allocator
 vkAllocArenaAllocator: mem.Allocator
 
 @(private = "file")
@@ -188,10 +190,12 @@ vkAllocatorInit :: proc() {
 
 	mem.dynamic_arena_init(&__arena, defAllocator, defAllocator, mem.Megabyte * 4, 0)
 	mem.dynamic_arena_init(&__tempArena, defAllocator, defAllocator, mem.Megabyte * 1, 0)
+	mem.dynamic_arena_init(&__bufTempArena, defAllocator, defAllocator, mem.Megabyte * 1, 0)
 	mem.dynamic_arena_init(&__allocArena, defAllocator, defAllocator, mem.Megabyte * 1, 0)
 
 	vkArenaAllocator = mem.dynamic_arena_allocator(&__arena)
 	vkTempArenaAllocator = mem.dynamic_arena_allocator(&__tempArena)
+	vkBufTempArenaAllocator = mem.dynamic_arena_allocator(&__bufTempArena)
 	mem.mutex_allocator_init(&__allocArenaMtx, mem.dynamic_arena_allocator(&__allocArena))
 	vkAllocArenaAllocator = mem.mutex_allocator(&__allocArenaMtx)
 
@@ -228,17 +232,15 @@ vkAllocatorDestroy :: proc() {
 
 	mem.dynamic_arena_destroy(&__arena)
 	mem.dynamic_arena_destroy(&__tempArena)
+	mem.dynamic_arena_destroy(&__bufTempArena)
 	mem.dynamic_arena_destroy(&__allocArena)
 
 	delete(gVkMemIdxCnts)
 }
 
-@(private = "file")
-gVkMemBufs: [dynamic]^VkMemBuffer
-@(private = "file")
-VkMaxMemIdxCnt: uint : 4
-@(private = "file")
-gVkMemIdxCnts: []uint
+@(private = "file") gVkMemBufs: [dynamic]^VkMemBuffer
+@(private = "file") VkMaxMemIdxCnt : uint : 4
+@(private = "file") gVkMemIdxCnts: []uint
 
 vkFindMemType :: proc "contextless" (
 	typeFilter: u32,
@@ -258,8 +260,7 @@ vkFindMemType :: proc "contextless" (
 	return
 }
 // ! don't call vulkan_res.init separately
-@(private = "file")
-VkMemBuffer_Init :: proc(
+@(private = "file") VkMemBuffer_Init :: proc(
 	cellSize: VkSize,
 	len: VkSize,
 	typeFilter: u32,
@@ -277,7 +278,7 @@ VkMemBuffer_Init :: proc(
 
 
 	if memBuf.cache {
-		memBuf.allocateInfo.allocationSize = xmath.ceilUp(len * cellSize, vkNonCoherentAtomSize)
+		memBuf.allocateInfo.allocationSize = ceilUp(len * cellSize, vkNonCoherentAtomSize)
 		memBuf.len = memBuf.allocateInfo.allocationSize / cellSize
 	}
 
@@ -292,8 +293,7 @@ VkMemBuffer_Init :: proc(
 
 	return memBuf
 }
-@(private = "file")
-VkMemBuffer_InitSingle :: proc(cellSize: VkSize, typeFilter: u32) -> Maybe(VkMemBuffer) {
+@(private = "file") VkMemBuffer_InitSingle :: proc(cellSize: VkSize, typeFilter: u32) -> Maybe(VkMemBuffer) {
 	memBuf := VkMemBuffer {
 		cellSize = cellSize,
 		len = 1,
@@ -312,8 +312,7 @@ VkMemBuffer_InitSingle :: proc(cellSize: VkSize, typeFilter: u32) -> Maybe(VkMem
 
 	return memBuf
 }
-@(private = "file")
-VkMemBuffer_Deinit2 :: proc(self: ^VkMemBuffer) {
+@(private = "file") VkMemBuffer_Deinit2 :: proc(self: ^VkMemBuffer) {
 	vk.FreeMemory(vkDevice, self.deviceMem, nil)
 	if !self.single {
 		for n: ^list.Node; n.next != nil; n = n.next {
@@ -321,8 +320,7 @@ VkMemBuffer_Deinit2 :: proc(self: ^VkMemBuffer) {
 		}
 	}
 }
-@(private = "file")
-VkMemBuffer_Deinit :: proc(self: ^VkMemBuffer) {
+@(private = "file") VkMemBuffer_Deinit :: proc(self: ^VkMemBuffer) {
 	for b, i in gVkMemBufs {
 		if b == self {
 			ordered_remove(&gVkMemBufs, i) //!no unordered
@@ -339,22 +337,16 @@ VkAllocatorError :: enum {
 	DEVICE_MEMORY_LIMIT,
 }
 
-
-@(private = "file")
-VkMemBuffer_BindBufferNode :: proc(
+@(private = "file") VkMemBuffer_BindBufferNode :: proc(
 	self: ^VkMemBuffer,
 	vkResource: $T,
 	cellCnt: VkSize,
-) -> (
-	VkResourceRange,
-	VkAllocatorError,
-) where T == vk.Buffer ||
-	T == vk.Image {
-	VkMemBuffer_BindBufferNodeInside :: proc(self: ^VkMemBuffer, vkResource: $T, idx: VkSize) {
-		if (T == vk.Buffer) {
+) -> (VkResourceRange, VkAllocatorError) where T == vk.Buffer || T == vk.Image {
+	VkMemBuffer_BindBufferNodeInside :: proc(self: ^VkMemBuffer, vkResource: $T, idx: VkSize) where T == vk.Buffer || T == vk.Image {
+		when (T == vk.Buffer) {
 			res := vk.BindBufferMemory(vkDevice, vkResource, self.deviceMem, self.cellSize * idx)
 			if res != .SUCCESS do panicLog("VkMemBuffer_BindBufferNodeInside BindBufferMemory : ", res)
-		} else if (T == vk.Image) {
+		} else when (T == vk.Image) {
 			res := vk.BindImageMemory(vkDevice, vkResource, self.deviceMem, self.cellSize * idx)
 			if res != .SUCCESS do panicLog("VkMemBuffer_BindBufferNodeInside BindImageMemory : ", res)
 		}
@@ -368,7 +360,7 @@ VkMemBuffer_BindBufferNode :: proc(
 	cur: ^VkMemBufferNode = auto_cast self.cur
 	for cur.free && cellCnt <= cur.size {
 		cur = auto_cast (cur.node.next if cur.node.next != nil else self.list.head)
-		if cur == self.cur do return nil, .DEVICE_MEMORY_LIMIT
+		if cur == auto_cast self.cur do return nil, .DEVICE_MEMORY_LIMIT
 	}
 	VkMemBuffer_BindBufferNodeInside(self, vkResource, cur.idx)
 	cur.free = false
@@ -388,7 +380,7 @@ VkMemBuffer_BindBufferNode :: proc(
 	} else {
 		if remain > 0 {
 			if !curNext.free || curNext.idx < cur.idx {
-				xlist.insert_after(&self.list, cur, auto_cast new(VkMemBufferNode))
+				xlist.insert_after(&self.list, auto_cast cur, auto_cast new(VkMemBufferNode))
 				next: ^VkMemBufferNode = auto_cast cur.node.next
 				next.free = true
 				next.idx = cur.idx + cellCnt
@@ -402,8 +394,7 @@ VkMemBuffer_BindBufferNode :: proc(
 	cur.size = cellCnt
 	return range, .NONE
 }
-@(private = "file")
-VkMemBuffer_UnBindBufferNode :: proc(
+@(private = "file") VkMemBuffer_UnBindBufferNode :: proc(
 	self: ^VkMemBuffer,
 	vkResource: $T,
 	range: VkResourceRange,
@@ -453,27 +444,25 @@ VkMemBuffer_UnBindBufferNode :: proc(
 
 }
 
-@(private = "file")
-VkMemBuffer_CreateFromResource :: proc(
+@(private = "file") VkMemBuffer_CreateFromResource :: proc(
 	vkResource: $T,
 	memProp: vk.MemoryPropertyFlags,
 	outIdx: ^VkResourceRange,
 	maxSize: VkSize,
-	useGCPUMem: bool,
-) -> (
-	memBuf: ^VkMemBuffer,
-) where T == vk.Buffer ||
-	T == vk.Image {
-	_BindBufferNode :: proc(b: ^VkMemBuffer) -> bool {
+) -> (memBuf: ^VkMemBuffer) where T == vk.Buffer || T == vk.Image {
+	memType:u32
+	ok:bool
+
+	_BindBufferNode :: proc(b: ^VkMemBuffer, memType: u32, vkResource: $T, cellCnt:VkSize, outIdx: ^VkResourceRange, memBuf: ^^VkMemBuffer) -> bool {
 		if b.allocateInfo.memoryTypeIndex != memType do return false
 		outIdx_, err := VkMemBuffer_BindBufferNode(b, vkResource, cellCnt)
 		if err != .NONE do return false
 		if outIdx_ == nil do panicLog("")
 		outIdx^ = outIdx_
-		memBuf = b
+		memBuf^ = b
 		return true
 	}
-	_Init :: proc() -> Maybe(VkMemBuffer) {
+	_Init :: proc(BLKSize:VkSize, maxSize_:VkSize, memRequire: vk.MemoryRequirements, memProp_:vk.MemoryPropertyFlags) -> Maybe(VkMemBuffer) {
 		memBufTLen := max(BLKSize, maxSize_) / memRequire.alignment + 1
 		if max(BLKSize, maxSize_) % memRequire.alignment == 0 do memBufTLen -= 1
 		return VkMemBuffer_Init(
@@ -495,7 +484,7 @@ VkMemBuffer_CreateFromResource :: proc(
 
 	memProp_ := memProp
 	if ((vkMemBlockLen == vkMemSpcialBlockLen) ||
-		   ((T == vk.Buffer && maxSize_ <= 256) || useGCPUMem)) &&
+		   ((T == vk.Buffer && maxSize_ <= 256))) &&
 	   (.HOST_VISIBLE in memProp_) {
 		if vkSupportCacheLocal {
 			memProp_ = {.HOST_VISIBLE, .HOST_CACHED, .DEVICE_LOCAL}
@@ -510,13 +499,13 @@ VkMemBuffer_CreateFromResource :: proc(
 	memBuf = nil
 	for b in gVkMemBufs {
 		if b.cellSize != memRequire.alignment do continue
-		memType, ok := vkFindMemType(memRequire.memoryTypeBits, memProp_)
+		memType, ok = vkFindMemType(memRequire.memoryTypeBits, memProp_)
 		if !ok {
 			memProp_ = memProp
 			memType, ok = vkFindMemType(memRequire.memoryTypeBits, memProp_)
 			if !ok do panicLog("vkFindMemType Failed")
 		}
-		if !_BindBufferNode(b) do continue
+		if !_BindBufferNode(b, memType, vkResource, cellCnt, outIdx, &memBuf) do continue
 		break
 	}
 
@@ -524,8 +513,8 @@ VkMemBuffer_CreateFromResource :: proc(
 		memBuf = new(VkMemBuffer, vkArenaAllocator)
 
 		memFlag := vk.MemoryPropertyFlags{.HOST_VISIBLE, .DEVICE_LOCAL}
-		BLKSize = vkMemSpcialBlockLen if memProp_ >= memFlag else vkMemBlockLen
-		memBufT := _Init()
+		BLKSize := vkMemSpcialBlockLen if memProp_ >= memFlag else vkMemBlockLen
+		memBufT := _Init(BLKSize, maxSize_, memRequire, memProp_)
 
 		if memBufT == nil {
 			free(memBuf)
@@ -534,14 +523,14 @@ VkMemBuffer_CreateFromResource :: proc(
 			memProp_ = {.HOST_VISIBLE, .HOST_CACHED}
 			for b in gVkMemBufs {
 				if b.cellSize != memRequire.alignment do continue
-				memType, ok = vkFindMemType(memRequire.memoryTypeBits, memProp_)
+				memType, ok := vkFindMemType(memRequire.memoryTypeBits, memProp_)
 				if !ok do panicLog("")
-				if !_BindBufferNode(b) do continue
+				if !_BindBufferNode(b, memType, vkResource, cellCnt, outIdx, &memBuf) do continue
 				break
 			}
 			if memBuf == nil {
 				BLKSize = vkMemBlockLen
-				memBufT = _Init()
+				memBufT = _Init(BLKSize, maxSize_, memRequire, memProp_)
 				if memBufT == nil do panicLog("")
 				memBuf^ = memBufT.?
 			}
@@ -549,20 +538,15 @@ VkMemBuffer_CreateFromResource :: proc(
 			memBuf^ = memBufT.?
 		}
 
-		if !_BindBufferNode(memBuf) do panicLog("")
+		if !_BindBufferNode(memBuf, memType, vkResource, cellCnt, outIdx, &memBuf) do panicLog("")
 		append(&gVkMemBufs, memBuf)
 	}
 	gVkMemIdxCnts[memBuf.allocateInfo.memoryTypeIndex] += 1
 	return
 }
 
-@(private = "file")
-VkMemBuffer_CreateFromResourceSingle :: proc(
-	vkResource: $T,
-) -> (
-	memBuf: ^VkMemBuffer,
-) where T == vk.Buffer ||
-	T == vk.Image {
+@(private = "file") VkMemBuffer_CreateFromResourceSingle :: proc(vkResource: $T) -> (memBuf: ^VkMemBuffer) 
+where T == vk.Buffer || T == vk.Image {
 	memBuf = nil
 	memRequire: vk.MemoryRequirements
 
@@ -573,7 +557,8 @@ VkMemBuffer_CreateFromResourceSingle :: proc(
 	}
 
 	memBuf = new(VkMemBuffer, vkArenaAllocator)
-	memBuf^ = VkMemBuffer_InitSingle(memRequire.size, memRequire.memoryTypeBits)
+	outMemBuf :=  VkMemBuffer_InitSingle(memRequire.size, memRequire.memoryTypeBits)
+	memBuf^ = outMemBuf.?
 
 	VkMemBuffer_BindBufferNode(memBuf, vkResource, 1) //can't (must no) error
 
@@ -581,8 +566,7 @@ VkMemBuffer_CreateFromResourceSingle :: proc(
 	return
 }
 
-@(private = "file")
-AppendOp :: proc(node: OpNode) {
+@(private = "file") AppendOp :: proc(node: OpNode) {
 	if exiting {
 		#partial switch n in node {
 		case OpMapCopy:
@@ -620,8 +604,7 @@ AppendOp :: proc(node: OpNode) {
 	sync.atomic_mutex_unlock(&gQueueMtx)
 }
 
-@(private = "file")
-AppendOpSave :: proc(node: OpNode) {
+@(private = "file") AppendOpSave :: proc(node: OpNode) {
 	#partial switch n in node {
 	case OpMapCopy, OpCreateBuffer, OpCreateTexture:
 		sync.atomic_mutex_lock(&gQueueMtx)
@@ -667,8 +650,7 @@ VkBufferResource_CreateTexture :: #force_inline proc(
 	}
 }
 
-@(private = "file")
-VkBufferResource_CreateBufferNoAsync :: #force_inline proc(
+@(private = "file") VkBufferResource_CreateBufferNoAsync :: #force_inline proc(
 	self: ^VkBufferResource,
 	option: BufferCreateOption,
 	data: Maybe([]byte),
@@ -678,21 +660,18 @@ VkBufferResource_CreateBufferNoAsync :: #force_inline proc(
 	ExecuteCreateBuffer(self, data, allocator)
 }
 
-@(private = "file")
-VkBufferResource_DestroyBufferNoAsync :: #force_inline proc(self: ^VkBufferResource) {
+@(private = "file") VkBufferResource_DestroyBufferNoAsync :: #force_inline proc(self: ^VkBufferResource) {
 	VkMemBuffer_UnBindBufferNode(self.vkMemBuffer, self.__resource, self.idx)
 	self.__resource = 0
 }
 
-@(private = "file")
-VkBufferResource_DestroyTextureNoAsync :: #force_inline proc(self: ^VkTextureResource) {
+@(private = "file") VkBufferResource_DestroyTextureNoAsync :: #force_inline proc(self: ^VkTextureResource) {
 	vk.DestroyImageView(vkDevice, self.imgView, nil)
 	VkMemBuffer_UnBindBufferNode(self.vkMemBuffer, self.__resource, self.idx)
 	self.__resource = 0
 }
 
-@(private = "file")
-VkBufferResource_MapCopy :: #force_inline proc(
+@(private = "file") VkBufferResource_MapCopy :: #force_inline proc(
 	self: ^VkBaseResource,
 	data: []byte,
 	allocator: Maybe(runtime.Allocator) = nil,
@@ -757,8 +736,7 @@ VkBufferResource_Deinit :: proc(self: ^VkBaseResource) {
 
 
 //not mul cellsize
-@(private = "file")
-VkMemBuffer_Map :: #force_inline proc "contextless" (
+@(private = "file") VkMemBuffer_Map :: #force_inline proc "contextless" (
 	self: ^VkMemBuffer,
 	start: VkSize,
 	size: VkSize,
@@ -767,45 +745,344 @@ VkMemBuffer_Map :: #force_inline proc "contextless" (
 	vk.MapMemory(vkDevice, self.deviceMem, start, size, {}, &outData)
 	return auto_cast outData
 }
-@(private = "file")
-VkMemBuffer_UnMap :: #force_inline proc "contextless" (self: ^VkMemBuffer) {
-
+@(private = "file") VkMemBuffer_UnMap :: #force_inline proc "contextless" (self: ^VkMemBuffer) {
+	self.mapSize = 0
+	vk.UnmapMemory(vkDevice, self.deviceMem)
 }
 
-@(private = "file")
-ExecuteCreateBuffer :: proc(
+@(private = "file") ExecuteCreateBuffer :: proc(
 	self: ^VkBufferResource,
 	data: Maybe([]byte),
 	allocator: Maybe(runtime.Allocator) = nil,
 ) {
+	if self.option.type == .__STAGING {
+		self.option.resourceUsage = .CPU
+		self.option.single = false
+	}
 
+	memProp : vk.MemoryPropertyFlags;
+	switch self.option.resourceUsage {
+		case .GPU:memProp = {.DEVICE_LOCAL}
+		case .CPU:memProp = {.HOST_CACHED, .HOST_VISIBLE}
+	}
+	bufUsage:vk.BufferUsageFlags
+	switch self.option.type {
+		case .VERTEX: bufUsage = {.VERTEX_BUFFER}
+		case .INDEX: bufUsage = {.INDEX_BUFFER}
+		case .UNIFORM: bufUsage = {.UNIFORM_BUFFER}
+		case .__STAGING: bufUsage = {.TRANSFER_SRC}
+	}
+
+	bufInfo := vk.BufferCreateInfo{
+		sType = .BUFFER_CREATE_INFO,
+		size = self.option.len,
+		usage = bufUsage,
+		sharingMode = .EXCLUSIVE
+	}
+
+	last:^VkBufferResource
+	if data != nil && self.option.resourceUsage == .GPU {
+		bufInfo.usage |= {.TRANSFER_DST}
+		if self.option.len > auto_cast len(data.?) do panicLog("create_buffer _data not enough size. ", self.option.len, ", ", len(data.?))
+		
+		last = new(VkBufferResource, vkBufTempArenaAllocator)
+		last^ = {}
+		VkBufferResource_CreateBufferNoAsync(last, {
+			len = self.option.len,
+			resourceUsage = .CPU,
+			single = false,
+			type = .__STAGING,
+		}, data, allocator)
+	} else if self.option.type == .__STAGING {
+		if data == nil do panicLog("staging buffer data can't nil")
+	}
+
+	res := vk.CreateBuffer(vkDevice, &bufInfo, nil, &self.__resource)
+	if res != .SUCCESS do panicLog("res := vk.CreateBuffer(vkDevice, &bufInfo, nil, &self.__resource) : ", res)
+
+	self.vkMemBuffer = VkMemBuffer_CreateFromResourceSingle(self.__resource) if self.option.single else
+	VkMemBuffer_CreateFromResource(self.__resource, memProp, &self.idx, 0)
+
+	if data != nil {
+		if self.option.resourceUsage != .GPU {
+			AppendOpSave(OpMapCopy{
+				resource = auto_cast self,
+				data = data.?,
+				allocator = allocator
+			})
+		} else {
+			 //above VkBufferResource_CreateBufferNoAsync call, staging buffer is added and map_copy command is added.
+			AppendOpSave(OpCopyBuffer{src = last, target = self})
+			AppendOpSave(OpDestroyBuffer{src = last})
+		}
+	}
 }
-@(private = "file")
-ExecuteCreateTexture :: proc(
+@(private = "file") ExecuteCreateTexture :: proc(
 	self: ^VkTextureResource,
 	data: Maybe([]byte),
 	allocator: Maybe(runtime.Allocator) = nil,
 ) {
+	memProp : vk.MemoryPropertyFlags;
+	switch self.option.resourceUsage {
+		case .GPU:memProp = {.DEVICE_LOCAL}
+		case .CPU:memProp = {.HOST_CACHED, .HOST_VISIBLE}
+	}
+	texUsage:vk.ImageUsageFlags = {}
+	isDepth := TextureFmt_IsDepth(self.option.format)
 
-}
-@(private = "file")
-ExecuteRegisterDescriptorPool :: proc(size: []VkDescriptorPoolSize) {
+	if .IMAGE_RESOURCE in self.option.textureUsage do texUsage |= {.SAMPLED}
+	if .FRAME_BUFFER in self.option.textureUsage {
+		if isDepth {
+			texUsage |= {.DEPTH_STENCIL_ATTACHMENT}
+		} else {
+			texUsage |= {.COLOR_ATTACHMENT}
+		}
+	}
+	if .__INPUT_ATTACHMENT in self.option.textureUsage do texUsage |= {.INPUT_ATTACHMENT}
+	if .__TRANSIENT_ATTACHMENT in self.option.textureUsage do texUsage |= {.TRANSIENT_ATTACHMENT}
 
-}
-@(private = "file")
-ExecuteUpdateDescriptorSets :: proc(sets: []VkDescriptorSet) {
+	tiling :vk.ImageTiling = .OPTIMAL
 
-}
-@(private = "file")
-ExecuteCopyBuffer :: proc(src: ^VkBufferResource, target: ^VkBufferResource) {
+	if isDepth {
+		if (.DEPTH_STENCIL_ATTACHMENT in texUsage && !vkDepthHasOptimal) ||
+			(.SAMPLED in texUsage && !vkDepthHasSampleOptimal) ||
+			(.TRANSFER_SRC in texUsage && !vkDepthHasTransferSrcOptimal) ||
+			(.TRANSFER_DST in texUsage && !vkDepthHasTransferDstOptimal) {
+			tiling = .LINEAR
+		}
+	} else {
+		if (.COLOR_ATTACHMENT in texUsage && !vkColorHasAttachOptimal) ||
+			(.SAMPLED in texUsage && !vkColorHasSampleOptimal) ||
+			(.TRANSFER_SRC in texUsage && !vkColorHasTransferSrcOptimal) ||
+			(.TRANSFER_DST in texUsage && !vkColorHasTransferDstOptimal) {
+			tiling = .LINEAR
+		}
+	}
 
-}
-@(private = "file")
-ExecuteCopyBufferToTexture :: proc(src: ^VkBufferResource, target: ^VkTextureResource) {
+	bit : u32 = auto_cast TextureFmt_BitSize(self.option.format)
 
+	imgInfo := vk.ImageCreateInfo{
+		sType = .IMAGE_CREATE_INFO,
+		arrayLayers = self.option.len,
+		usage = texUsage,
+		sharingMode = .EXCLUSIVE,
+		extent = {width = self.option.width, height = self.option.height, depth = 1},
+		samples = samplesToVkSampleCountFlags(self.option.samples),
+		tiling = tiling,
+		mipLevels = 1,
+		format = TextureFmtToVkFmt(self.option.format),
+		imageType = TextureTypeToVkImageType(self.option.type),
+		initialLayout = .UNDEFINED,
+	}
+
+	last:^VkBufferResource
+	if data != nil && self.option.resourceUsage == .GPU {
+		imgInfo.usage |= {.TRANSFER_DST}
+		
+		last = new(VkBufferResource, vkBufTempArenaAllocator)
+		last^ = {}
+		VkBufferResource_CreateBufferNoAsync(last, {
+			len = auto_cast(imgInfo.extent.width * imgInfo.extent.height * imgInfo.extent.depth * imgInfo.arrayLayers * bit),
+			resourceUsage = .CPU,
+			single = false,
+			type = .__STAGING,
+		}, data, allocator)
+	}
+
+	res := vk.CreateImage(vkDevice, &imgInfo, nil, &self.__resource)
+	if res != .SUCCESS do panicLog("res := vk.CreateImage(vkDevice, &bufInfo, nil, &self.__resource) : ", res)
+
+	self.vkMemBuffer = VkMemBuffer_CreateFromResourceSingle(self.__resource) if self.option.single else
+	VkMemBuffer_CreateFromResource(self.__resource, memProp, &self.idx, 0)
+
+	imgViewInfo := vk.ImageViewCreateInfo{
+		sType = .IMAGE_VIEW_CREATE_INFO,
+		format = imgInfo.format,
+		components = {r = .IDENTITY, g = .IDENTITY, b = .IDENTITY, a = .IDENTITY},
+		image = self.__resource,
+		subresourceRange = {
+			aspectMask = isDepth ? {.DEPTH, .STENCIL} : {.COLOR},
+			baseMipLevel = 0,
+			levelCount = 1,
+			baseArrayLayer = 0,
+			layerCount = imgInfo.arrayLayers,
+		},
+	}
+	switch self.option.type {
+		case .TEX2D: imgViewInfo.viewType = imgInfo.arrayLayers > 1 ? .D2_ARRAY : .D2
+	}
+	
+	res = vk.CreateImageView(vkDevice, &imgViewInfo, nil, &self.imgView)
+	if res != .SUCCESS do panicLog("res = vk.CreateImageView(vkDevice, &imgViewInfo, nil, &self.imgView) : ", res)
+
+	if data != nil {
+		if self.option.resourceUsage != .GPU {
+			AppendOpSave(OpMapCopy{
+				resource = auto_cast self,
+				data = data.?,
+				allocator = allocator
+			})
+		} else {
+			 //above VkBufferResource_CreateBufferNoAsync call, staging buffer is added and map_copy command is added.
+			AppendOpSave(OpCopyBufferToTexture{src = last, target = self})
+			AppendOpSave(OpDestroyBuffer{src = last})
+		}
+	}
 }
-@(private = "file")
-OpAllocQueueFree :: proc() {
+@(private = "file") ExecuteRegisterDescriptorPool :: #force_inline proc(size: []VkDescriptorPoolSize) {
+	//?? no need? execute_register_descriptor_pool
+}
+@(private = "file") __CreateDescriptorPool :: proc(size:[]VkDescriptorPoolSize, out:^VkDescriptorPoolMem) {
+	poolSize :[]vk.DescriptorPoolSize = make([]vk.DescriptorPoolSize, len(size), vkArenaAllocator)
+	defer delete(poolSize, vkArenaAllocator)
+
+	for _, i in size {
+		poolSize[i].descriptorCount = size[i].cnt * vkPoolBlock
+		poolSize[i].type = DescriptorTypeToVkDescriptorType(size[i].type)
+	}
+	poolInfo := vk.DescriptorPoolCreateInfo{
+		poolSizeCount = auto_cast len(poolSize),
+		pPoolSizes = raw_data(poolSize),
+		maxSets = vkPoolBlock,
+	}
+	res := vk.CreateDescriptorPool(vkDevice, &poolInfo, nil, &out.pool)
+	if res != .SUCCESS do panicLog("res := vk.CreateDescriptorPool(vkDevice, &poolInfo, nil, &out.pool) : ", res)
+}
+
+@(private = "file") ExecuteUpdateDescriptorSets :: proc(sets: []VkDescriptorSet) {
+	for &s in sets {
+		if s.__set == 0 {
+			pool : [dynamic]VkDescriptorPoolMem
+			if raw_data(s.size) in gDesciptorPools {
+				pool = gDesciptorPools[raw_data(s.size)]
+			} else {
+				pool = make([dynamic]VkDescriptorPoolMem, vkArenaAllocator)
+				gDesciptorPools[raw_data(s.size)] = pool
+				append(&pool, VkDescriptorPoolMem{cnt = 0})
+				__CreateDescriptorPool(s.size, &pool[0])
+			}
+
+			last := &pool[len(pool) - 1]
+			if last.cnt >= vkPoolBlock {
+				append(&pool, VkDescriptorPoolMem{cnt = 0})
+				last = &pool[len(pool) - 1]
+				__CreateDescriptorPool(s.size, last)
+			}
+
+			last.cnt += 1
+			allocInfo := vk.DescriptorSetAllocateInfo{
+				sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+				descriptorPool = last.pool,
+				descriptorSetCount = 1,
+				pSetLayouts = &s.layout,
+			}
+			res := vk.AllocateDescriptorSets(vkDevice, &allocInfo, &s.__set)
+			if res != .SUCCESS do panicLog("res := vk.AllocateDescriptorSets(vkDevice, &allocInfo, &s.__set) : ", res)
+		}
+
+		cnt:u32 = 0
+		bufCnt:u32 = 0
+		texCnt:u32 = 0
+
+		//sets[i].__resources array must match v.size configuration.
+		for s in s.size {
+			cnt += s.cnt
+		}
+		
+		for r in s.__resources[0:cnt] {
+			if type_of(r^) == VkBufferResource {
+				bufCnt += 1
+			} else if type_of(r^) == VkTextureResource {
+				texCnt += 1
+			} else {
+				panicLog("invaild type s.__resources[0:cnt] r")
+			}
+		}
+
+		bufs := make([]vk.DescriptorBufferInfo, bufCnt, vkTempArenaAllocator)
+		texs := make([]vk.DescriptorImageInfo, texCnt, vkTempArenaAllocator)
+		bufCnt = 0
+		texCnt = 0
+
+		for r in s.__resources[0:cnt] {
+			if type_of(r^) == VkBufferResource {
+				bufs[bufCnt] = vk.DescriptorBufferInfo{
+					buffer = ((^VkBufferResource)(r)).__resource,
+					offset = 0,
+					range = ((^VkBufferResource)(r)).option.len
+				}
+				bufCnt += 1
+			} else {//if type_of(r^) == VkTextureResource
+				texs[texCnt] = vk.DescriptorImageInfo{
+					imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+					imageView = ((^VkTextureResource)(r)).imgView,
+					sampler = ((^VkTextureResource)(r)).sampler,
+				}
+				texCnt += 1
+			}
+		}
+
+		bufCnt = 0
+		texCnt = 0
+		for n, i in s.size {	
+			switch n.type {
+				case .SAMPLER:
+					append(&gVkUpdateDesciptorSetList, vk.WriteDescriptorSet{
+						dstSet = s.__set,
+						dstBinding = s.bindings[i],
+						dstArrayElement = 0,
+						descriptorCount = n.cnt,
+						descriptorType = DescriptorTypeToVkDescriptorType(n.type),
+						pBufferInfo = nil,
+						pImageInfo = &texs[texCnt],
+						pTexelBufferView = nil,
+						sType = .WRITE_DESCRIPTOR_SET
+					})
+					texCnt += n.cnt
+				case .UNIFORM:
+					append(&gVkUpdateDesciptorSetList, vk.WriteDescriptorSet{
+						dstSet = s.__set,
+						dstBinding = s.bindings[i],
+						dstArrayElement = 0,
+						descriptorCount = n.cnt,
+						descriptorType = DescriptorTypeToVkDescriptorType(n.type),
+						pBufferInfo = &bufs[bufCnt],
+						pImageInfo = nil,
+						pTexelBufferView = nil,
+						sType = .WRITE_DESCRIPTOR_SET
+					})
+					bufCnt += n.cnt
+			}
+		}
+	}
+}
+@(private = "file") ExecuteCopyBuffer :: proc(src: ^VkBufferResource, target: ^VkBufferResource) {
+	copyRegion := vk.BufferCopy{
+		size = target.option.len,
+		srcOffset = 0,
+		dstOffset = 0
+	}
+	vk.CmdCopyBuffer(gCmd, src.__resource, target.__resource, 1, &copyRegion)
+}
+@(private = "file") ExecuteCopyBufferToTexture :: proc(src: ^VkBufferResource, target: ^VkTextureResource) {
+	vkTransitionImageLayout(gCmd, target.__resource, 1, 0, target.option.len, .UNDEFINED, .TRANSFER_DST_OPTIMAL)
+	region := vk.BufferImageCopy{
+		bufferOffset = 0,
+		bufferRowLength = 0,
+		bufferImageHeight = 0,
+		imageOffset = {x = 0,y = 0,z = 0},
+		imageExtent = {width = target.option.width, height = target.option.height, depth = 1},
+		imageSubresource = {
+			aspectMask = {.COLOR},
+			baseArrayLayer = 0,
+			mipLevel = 0,
+			layerCount = target.option.len
+		}
+	}
+	vk.CmdCopyBufferToImage(gCmd, src.__resource, target.__resource, .TRANSFER_DST_OPTIMAL, 1, &region)
+	vkTransitionImageLayout(gCmd, target.__resource, 1, 0, target.option.len, .TRANSFER_DST_OPTIMAL, .SHADER_READ_ONLY_OPTIMAL)
+}
+@(private = "file") OpAllocQueueFree :: proc() {
 	sync.atomic_mutex_lock(&gQueueMtx)
 	defer sync.atomic_mutex_unlock(&gQueueMtx)
 
@@ -817,8 +1094,7 @@ OpAllocQueueFree :: proc() {
 	}
 	clear(&opAllocQueue)
 }
-@(private = "file")
-SaveToMapQueue :: proc(inoutMemBuf: ^^VkMemBuffer) {
+@(private = "file") SaveToMapQueue :: proc(inoutMemBuf: ^^VkMemBuffer) {
 	for &node in opSaveQueue {
 		#partial switch n in node {
 		case OpMapCopy:
@@ -832,8 +1108,7 @@ SaveToMapQueue :: proc(inoutMemBuf: ^^VkMemBuffer) {
 		}
 	}
 }
-@(private = "file")
-VkMemBuffer_MapCopyExecute :: proc(self: ^VkMemBuffer, nodes: []OpNode) {
+@(private = "file") VkMemBuffer_MapCopyExecute :: proc(self: ^VkMemBuffer, nodes: []OpNode) {
 	startIdx: VkSize = max(VkSize)
 	endIdx: VkSize = max(VkSize)
 	offIdx: u32 = 0
@@ -853,9 +1128,9 @@ VkMemBuffer_MapCopyExecute :: proc(self: ^VkMemBuffer, nodes: []OpNode) {
 			ranges[i].offset = idx.idx * self.cellSize
 
 			tmp := ranges[i].offset
-			ranges[i].offset = xmath.floorUp(ranges[i].offset, vkNonCoherentAtomSize)
+			ranges[i].offset = floorUp(ranges[i].offset, vkNonCoherentAtomSize)
 			ranges[i].size += tmp - ranges[i].offset
-			ranges[i].size = xmath.ceilUp(ranges[i].size, vkNonCoherentAtomSize)
+			ranges[i].size = ceilUp(ranges[i].size, vkNonCoherentAtomSize)
 
 			startIdx = min(startIdx, ranges[i].offset)
 			endIdx = max(endIdx, ranges[i].offset + ranges[i].size)
@@ -932,9 +1207,15 @@ VkMemBuffer_MapCopyExecute :: proc(self: ^VkMemBuffer, nodes: []OpNode) {
 	if self.cache do vk.FlushMappedMemoryRanges(vkDevice, auto_cast len(ranges), raw_data(ranges))
 }
 
+@(private = "file") ExecuteDestroyBuffer :: #force_inline proc(buf:^VkBufferResource) {
+	VkBufferResource_DestroyBufferNoAsync(buf)
+}
+@(private = "file") ExecuteDestroyTexture :: #force_inline proc(tex:^VkTextureResource) {
+	VkBufferResource_DestroyTextureNoAsync(tex)
+}
+
 //? delete private when need
-@(private = "file")
-VkMemBuffer_IsEmpty :: proc(self: ^VkMemBuffer) -> bool {
+@(private = "file") VkMemBuffer_IsEmpty :: proc(self: ^VkMemBuffer) -> bool {		sync.atomic_mutex_unlock(&gDestroyQueueMtx)
 	return(
 		(self.list.head != nil &&
 			self.list.head.next == nil &&
@@ -944,8 +1225,24 @@ VkMemBuffer_IsEmpty :: proc(self: ^VkMemBuffer) -> bool {
 }
 
 vkOpExecuteDestroy :: proc() {
+	sync.atomic_mutex_lock(&gDestroyQueueMtx)
+	if len(opDestroyQueue) == 0 {
+		sync.atomic_mutex_unlock(&gDestroyQueueMtx)
+		return
+	}
+	for node in opDestroyQueue {
+		#partial switch n in node {
+			case OpDestroyBuffer : ExecuteDestroyBuffer(n.src)
+			case OpDestroyTexture : ExecuteDestroyTexture(n.src)
+		}
+	}
+	clear(&opDestroyQueue)
+	sync.atomic_mutex_unlock(&gDestroyQueueMtx)
+	mem.dynamic_arena_reset(&__bufTempArena)
 }
-vkWaitAllocatorCmdFence :: proc() {
+vkWaitAllocatorCmdFence :: #force_inline proc  "contextless" () {
+	res := vk.WaitForFences(vkDevice, 1, &gFence, true, max(u64))
+	if res != .SUCCESS do panicLog("res := vk.WaitForFences(vkDevice, 1, &gFence, true, max(u64)) : ", res)
 }
 vkOpExecute :: proc(waitAndDestroy: bool) {
 	sync.atomic_mutex_lock(&gQueueMtx)

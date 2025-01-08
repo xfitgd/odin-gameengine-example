@@ -9,7 +9,6 @@ import "core:math/linalg"
 import "core:strings"
 import vk "vendor:vulkan"
 import "vendor:x11/xlib"
-import "xmath"
 
 display: ^xlib.Display
 defScreenIdx := 0
@@ -49,7 +48,7 @@ systemLinuxStart :: proc() {
 			&monitors,
 			monitorInfo {
 				isPrimary = i == i32(defScreenIdx),
-				rect = xmath.Rect_Init(
+				rect = Rect_Init(
 					[2]i32{crtc_info.x, crtc_info.y},
 					[2]i32{i32(crtc_info.width), i32(crtc_info.height)},
 				),
@@ -97,7 +96,7 @@ setWndSizeHint :: proc(first_call: bool) {
 
 linuxGetMonitorFromWindow :: proc() -> ^monitorInfo #no_bounds_check {
 	for &value in monitors {
-		if xmath.Rect_PointIn(value.rect, [2]i32{__windowX.?, __windowY.?}) do return &value
+		if Rect_PointIn(value.rect, [2]i32{__windowX.?, __windowY.?}) do return &value
 	}
 	return primaryMonitor
 }
