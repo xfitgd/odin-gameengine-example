@@ -10,7 +10,7 @@ import "core:strings"
 import "core:reflect"
 import "core:sync"
 import vk "vendor:vulkan"
-import "vendor:x11/xlib"
+import "glfw"
 
 vkInstance: vk.Instance
 vkDevice: vk.Device
@@ -581,8 +581,13 @@ vulkanStart :: proc() {
 		when is_log do println("XFIT SYSLOG : vulkan 1.0 device, set api version 1.0")
 		appInfo.apiVersion = vk.API_VERSION_1_0
 	}
-
-	instanceExtNames := make([dynamic]cstring, 0, len(INSTANCE_EXTENSIONS) + 3, context.temp_allocator)
+	glfwLen := 0
+	glfwExtensions : []cstring
+	when !is_mobile {
+		glfwExtensions = glfw.GetRequiredInstanceExtensions()
+		glfwLen = len(glfwExtensions)
+	}
+	instanceExtNames :[dynamic]cstring = make([dynamic]cstring, 0, len(INSTANCE_EXTENSIONS) + 3 + glfwLen, context.temp_allocator)
 	defer delete(instanceExtNames)
 	layerNames := make([dynamic]cstring, 0, len(LAYERS), context.temp_allocator)
 	defer delete(layerNames)
@@ -648,6 +653,16 @@ vulkanStart :: proc() {
 		append(&instanceExtNames, "VK_KHR_xlib_surface")
 	} else when ODIN_OS == .Windows {
 		append(&instanceExtNames, vk.KHR_WIN32_SURFACE_EXTENSION_NAME)
+	}
+
+	when !is_mobile {
+		insLen := len(instanceExtNames)
+		con: for &glfw in glfwExtensions {
+			for &ext in instanceExtNames[:insLen] {
+				if strings.compare(string(glfw), string(ext)) == 0 do continue con
+			}
+			append(&instanceExtNames, glfw)
+		}
 	}
 
 	instanceCreateInfo := vk.InstanceCreateInfo {
