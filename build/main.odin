@@ -5,7 +5,9 @@ import "core:encoding/json"
 import "core:mem"
 import "core:slice"
 import "core:os"
+import "core:os/os2"
 import "core:strings"
+import "core:sys/linux"
 
 
 read_build_json :: proc() -> (json.Value, bool) {
@@ -67,22 +69,56 @@ main :: proc() {
 
 
 		os.make_directory("bin")
+		o:string
+		debug:bool = false
 		if strings.compare(setting["build-type"].(json.String), "minimal") == 0 {
-			os.execvp("odin", {"build", 
-			setting["main-package-path"].(json.String), 
-			"-debug",
-			out_path, 
-			({}) if !is_android else "-define:__ANDROID__=true"})
+			o = "-o:minimal"
+			debug = true
 		} else {
-			o := strings.join({"-o:", setting["build-type"].(json.String)}, "")
-			defer delete(o)
-			os.execvp("odin", {"build", 
+			o = strings.join({"-o:", setting["build-type"].(json.String)}, "", context.temp_allocator)
+		}
+		//defer free_all(	context.temp_allocator)
+
+		r, w, err := os2.pipe()
+		if err != nil do panic("pipe")
+
+		p: os2.Process
+		p, err = os2.process_start(os2.Process_Desc{
+			command = {"/usr/local/odin/odin", "build", 
 			setting["main-package-path"].(json.String), 
-			"-no-bounds-check",
+			"-no-bounds-check" if !debug else ({}),
 			out_path, 
 			o, 
-			({}) if !is_android else "-define:__ANDROID__=true"})
+			"-debug" if debug else ({}),
+			({}) if !is_android else "-define:__ANDROID__=true"},
+			stdout  = w,
+			stderr  = w,
+		})
+		os2.close(w)
+	
+		output, err2 := os2.read_entire_file_from_file(r, context.temp_allocator)
+		if err2 != nil do fmt.panicf("read_entire_file_from_file %v", err)
+
+		if err != nil {
+			fmt.eprint(string(output))
+			fmt.panicf("%v", err)
+		} else {
+			state:os2.Process_State
+			state, err = os2.process_wait(p)
+
+			if state.exit_code != 0 {
+				fmt.eprint(string(output))
+
+				os2.close(r)
+				_ = os2.process_close(p)
+				os.exit(-1)
+			}
+
+			fmt.print(string(output))
+			if err != nil do panic("process_wait")
 		}
+		_ = os2.process_close(p)
+		os2.close(r)
 
 		if is_android {
 		}

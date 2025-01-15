@@ -41,6 +41,10 @@ GetMonitorContentScale :: proc "c" (monitor: MonitorHandle) -> (xscale, yscale: 
 	glfw.GetMonitorContentScale(monitor, &xscale, &yscale)
 	return
 }
+GetMonitorWorkarea :: proc "c" (monitor: MonitorHandle) -> (xpos, ypos, xscale, yscale: c.int) {
+	glfw.GetMonitorWorkarea(monitor, &xpos, &ypos, &xscale, &yscale)
+	return
+}
 
 SetMonitorUserPointer :: glfw.SetMonitorUserPointer
 GetMonitorUserPointer :: glfw.GetMonitorUserPointer

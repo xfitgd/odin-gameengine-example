@@ -26,7 +26,8 @@ Exiting :: proc() -> bool {return exiting}
 Init: proc()
 Update: proc(dt: f64)
 Destroy: proc()
-Activate: proc() = proc() {}
+Activate: proc "contextless" () = proc "contextless" () {}
+Close: proc "contextless" () -> bool = proc "contextless" () -> bool{ return true }
 
 @(private) __depthFmt:TextureFmt
 @(private) __swapImgCnt:u32 = 3
@@ -50,36 +51,26 @@ xfitInit :: proc() {
 }
 
 xfitMain :: proc(
-	_Init: proc(),
-	_Update: proc(dt: f64) = proc(dt: f64) {},
-	_Destroy: proc() = proc() {},
+	_windowTitle:cstring = "xfit",
 ) {
 	when ODIN_DEBUG {
 		if(!inited) do panic("call xfitInit first!")
 	}
-	Init = _Init
-	Update = _Update
-	Destroy = _Destroy
+	__windowTitle = _windowTitle
 
 	systemStart()
 }
 
-screenInfo :: struct {
-	monitor:     ^monitorInfo,
-	size:        PointU,
-	refreshRate: f64,
-}
-
 monitorInfo :: struct {
 	rect:       RectI,
-	resolution: screenInfo,
+	refreshRate: u32,
 	name:       string,
-	__windows:  monitor_info_windows,
 	isPrimary:  bool,
 }
 
 systemInit :: proc() {
 	trace.init(&gTraceCtx)
+	monitors = make([dynamic]monitorInfo)
 }
 
 systemStart :: proc() {
@@ -94,11 +85,13 @@ systemDestroy :: proc() {
 	when is_android {
 		//TODO
 	} else {
+		glfwDestroy()
 		glfwSystemDestroy()
 	}
 }
 systemAfterDestroy :: proc() {
 	trace.destroy(&gTraceCtx)
+	delete(monitors)
 }
 
 gTraceMtx: sync.Mutex
@@ -190,4 +183,14 @@ when is_android {
 
 @(private) loop :: proc() {
 
+}
+
+IsValidEnumValue :: proc "contextless" (enum_type: typeid, #any_int value: int) -> bool {
+    info := runtime.type_info_base(type_info_of(enum_type))
+    if v, ok := info.variant.(runtime.Type_Info_Enum); ok {
+		for i in v.values {
+			if i == runtime.Type_Info_Enum_Value(value) do return true
+		}
+    }
+    return false
 }

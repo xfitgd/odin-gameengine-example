@@ -698,11 +698,8 @@ vulkanStart :: proc() {
 	when is_android {
 		//TODO LOAD FUNC
 		vulkanAndroidStart(&vkSurface)
-	} else when ODIN_OS == .Linux {
-		vkCreateXlibSurfaceKHR = auto_cast vk.GetInstanceProcAddr(vkInstance, "vkCreateXlibSurfaceKHR")
-		vulkanLinuxStart(&vkSurface)
-	} else when ODIN_OS == .Windows {
-		vulkanWindowsStart(&vkSurface)
+	} else {// !ismobile
+		glfwVulkanStart(&vkSurface)
 	}
 
 	physicalDeviceCnt: u32

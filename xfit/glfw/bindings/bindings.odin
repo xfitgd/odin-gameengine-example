@@ -13,7 +13,7 @@ when !is_mobile {
 
 when ODIN_OS == .Windows {
 	foreign import glfw {
-		"../lib/windows/glfw/glfw3_mt.lib",
+		"../../lib/windows/glfw/glfw3_mt.lib",
 		"system:user32.lib",
 		"system:gdi32.lib",
 		"system:shell32.lib",
@@ -29,18 +29,19 @@ when ODIN_OS == .Windows {
 } else {
 	//TODO
 	when ODIN_ARCH == .amd64 {
-		@(private) LIBGLFW3 :: "../lib/linux/glfw/libglfw3_amd64.a"
+		@(private) LIBGLFW3 :: "../../lib/linux/glfw/libglfw3_amd64.a"
 	} else when ODIN_ARCH == .i386 {
-		@(private) LIBGLFW3 :: "../lib/linux/glfw/libglfw3_i386.a"
+		@(private) LIBGLFW3 :: "../../lib/linux/glfw/libglfw3_i386.a"
 	} else when ODIN_ARCH == .arm64 {
-		@(private) LIBGLFW3 :: "../lib/linux/glfw/libglfw3_arm64.a"
+		@(private) LIBGLFW3 :: "../../lib/linux/glfw/libglfw3_arm64.a"
 	} else when ODIN_ARCH == .riscv64 {
-		@(private) LIBGLFW3 :: "../lib/linux/glfw/libglfw3_riscv64.a"
+		@(private) LIBGLFW3 :: "../../lib/linux/glfw/libglfw3_riscv64.a"
 	} else when ODIN_ARCH == .arm32 {
-		@(private) LIBGLFW3 :: "../lib/linux/glfw/libglfw3_arm32.a"
+		@(private) LIBGLFW3 :: "../../lib/linux/glfw/libglfw3_arm32.a"
 	}
 
 	foreign import glfw { LIBGLFW3 }
+}
 }
 
 #assert(size_of(c.int) == size_of(b32))
@@ -65,6 +66,7 @@ foreign glfw {
 	GetMonitorPos          :: proc(monitor: MonitorHandle, xpos, ypos: ^c.int) ---
 	GetMonitorPhysicalSize :: proc(monitor: MonitorHandle, widthMM, heightMM: ^c.int) ---
 	GetMonitorContentScale :: proc(monitor: MonitorHandle, xscale, yscale: ^f32) ---
+	GetMonitorWorkarea :: proc(monitor: MonitorHandle, xpos, ypos, xscale, yscale: ^c.int) ---
 
 	SetMonitorUserPointer :: proc(monitor: MonitorHandle, pointer: rawptr) ---
 	GetMonitorUserPointer :: proc(monitor: MonitorHandle) -> rawptr ---
@@ -184,7 +186,7 @@ foreign glfw {
 	SetWindowPosCallback          :: proc(window: WindowHandle, cbfun: WindowPosProc)          -> WindowPosProc ---
 	SetFramebufferSizeCallback    :: proc(window: WindowHandle, cbfun: FramebufferSizeProc)    -> FramebufferSizeProc ---
 	SetDropCallback               :: proc(window: WindowHandle, cbfun: DropProc)               -> DropProc ---
-	SetMonitorCallback            :: proc(window: WindowHandle, cbfun: MonitorProc)            -> MonitorProc ---
+	SetMonitorCallback            :: proc(cbfun: MonitorProc)            -> MonitorProc ---
 	SetWindowMaximizeCallback     :: proc(window: WindowHandle, cbfun: WindowMaximizeProc)     -> WindowMaximizeProc ---
 	SetWindowContentScaleCallback :: proc(window: WindowHandle, cbfun: WindowContentScaleProc) -> WindowContentScaleProc ---
 
@@ -206,5 +208,4 @@ foreign glfw {
 	GetPlatform       :: proc() -> c.int ---
 	@(linkage="weak")
 	PlatformSupported :: proc(platform: c.int) -> b32 ---
-}
 }

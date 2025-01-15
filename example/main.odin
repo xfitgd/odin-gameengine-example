@@ -22,5 +22,6 @@ AfterDestroy ::proc() {
 main :: proc() {
     xfit.xfitInit()
 
-    xfit.xfitMain(Init)
+    xfit.Init = Init
+    xfit.xfitMain()
 }
