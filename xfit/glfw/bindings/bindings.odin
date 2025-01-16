@@ -3,31 +3,20 @@ package glfw_bindings
 import "core:c"
 import vk "vendor:vulkan"
 
-//?for static
-//GLFW_SHARED :: #config(GLFW_SHARED, false)
+GLFW_SHARED :: #config(GLFW_SHARED, false)
+when GLFW_SHARED {
+	#panic("Shared linking for glfw is not supported yet")
+}
 
 is_android :: #config(__ANDROID__, false)
 is_mobile :: is_android
 
 when !is_mobile {
-
 when ODIN_OS == .Windows {
-	foreign import glfw {
-		"../../lib/windows/glfw/glfw3_mt.lib",
-		"system:user32.lib",
-		"system:gdi32.lib",
-		"system:shell32.lib",
-	}
+	//TODO
 } else when ODIN_OS == .Darwin {
 	//TODO
-	foreign import glfw { 
-		"../lib/darwin/libglfw3.a",
-		"system:Cocoa.framework",
-		"system:IOKit.framework",
-		"system:OpenGL.framework",
-	}
 } else {
-	//TODO
 	when ODIN_ARCH == .amd64 {
 		@(private) LIBGLFW3 :: "../../lib/linux/glfw/libglfw3_amd64.a"
 	} else when ODIN_ARCH == .i386 {
@@ -39,7 +28,6 @@ when ODIN_OS == .Windows {
 	} else when ODIN_ARCH == .arm32 {
 		@(private) LIBGLFW3 :: "../../lib/linux/glfw/libglfw3_arm32.a"
 	}
-
 	foreign import glfw { LIBGLFW3 }
 }
 }

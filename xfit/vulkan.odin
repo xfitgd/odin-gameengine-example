@@ -551,7 +551,7 @@ createSwapChainAndImageViews :: proc() {
 	}
 } 
 
-vulkanStart :: proc() {
+vkStart :: proc() {
 	ok: bool
 	when ODIN_OS == .Windows {
 		vkLibrary, ok = dynlib.load_library("vulkan-1.dll")
@@ -996,8 +996,28 @@ vulkanStart :: proc() {
 	vkInitPipelines()
 }
 
-vulkanDestory :: proc() {
+vkDestory :: proc() {
 	vkCleanPipelines()
 	vkCleanShaderModules()
 	dynlib.unload_library(vkLibrary)
+}
+
+vkWaitDeviceIdle :: proc() {
+	res := vk.DeviceWaitIdle(vkDevice)
+	if res != .SUCCESS do panicLog("vkWaitDeviceIdle : ", res )
+}
+
+vkWaitGraphicsIdle :: proc() {
+
+	res := vk.QueueWaitIdle(vkGraphicsQueue)
+	if res != .SUCCESS do panicLog("vkWaitGraphicsIdle : ", res )
+}
+
+vkWaitPresentIdle :: proc() {
+	res := vk.QueueWaitIdle(vkPresentQueue)
+	if res != .SUCCESS do panicLog("vkWaitPresentIdle : ", res )
+}
+
+vkDrawFrame :: proc() {
+
 }

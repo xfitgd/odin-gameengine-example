@@ -2,8 +2,13 @@
 package xfit
 
 import "glfw"
+import "xreflect"
 import "core:c"
 import "core:sync"
+import "core:sys/linux"
+import "core:sys/windows"
+import "core:strings"
+import "core:bytes"
 import "base:runtime"
 import "base:intrinsics"
 import vk "vendor:vulkan"
@@ -51,27 +56,43 @@ glfwStart :: proc() {
         glfw.SetWindowPos(wnd, __windowX.?, __windowY.?)
     }
 
-    createRenderFuncThread()
+    CreateRenderFuncThread()
 }
 
-glfwSetFullScreen :: proc "contextless" (monitor:^monitorInfo) {
+glfwSetFullScreenMode :: proc "contextless" (monitor:^MonitorInfo) {
     for &m, i in monitors {
         if raw_data(m.name) == raw_data(monitor.name) {
             glfw.SetWindowMonitor(wnd, glfwMonitors[i], monitor.rect.x,
                  monitor.rect.y,
                 monitor.rect.width,
                 monitor.rect.height,
-                auto_cast monitor.refreshRate)
+                glfw.DONT_CARE)
             return
         }
     }
+}
+
+glfwSetBorderlessScreenMode :: proc "contextless" (monitor:^MonitorInfo) {
+    glfw.SetWindowMonitor(wnd, nil, monitor.rect.x,
+        monitor.rect.y,
+       monitor.rect.width,
+       monitor.rect.height,
+       glfw.DONT_CARE)
+}
+
+glfwSetWindowMode :: proc "contextless" () {
+    glfw.SetWindowMonitor(wnd, nil, prevWindowX,
+        prevWindowY,
+        auto_cast prevWindowWidth,
+        auto_cast prevWindowHeight,
+       glfw.DONT_CARE)
 }
 
 glfwVulkanStart :: proc "contextless" (surface: ^vk.SurfaceKHR) {
     if surface != nil do vk.DestroySurfaceKHR(vkInstance, surface^, nil)
 
     res := glfw.CreateWindowSurface(vkInstance, wnd, nil, surface)
-    if (res != .SUCCESS) do panicLog(res)
+    if (res != .SUCCESS) do panicLog("glfwVulkanStart : ", res)
 }
 
 @(private="file") glfwInitMonitors :: proc() {
@@ -84,7 +105,7 @@ glfwVulkanStart :: proc "contextless" (surface: ^vk.SurfaceKHR) {
 }
 
 @(private="file") glfwAppendMonitor :: proc(m:glfw.MonitorHandle) {
-    info:monitorInfo
+    info:MonitorInfo
     info.name = glfw.GetMonitorName(m)
     info.rect.x, info.rect.y, info.rect.width, info.rect.height = glfw.GetMonitorWorkarea(m)
     info.isPrimary = m == glfw.GetPrimaryMonitor()
@@ -109,7 +130,25 @@ glfwVulkanStart :: proc "contextless" (surface: ^vk.SurfaceKHR) {
     append(&glfwMonitors, m)
 }
 
+glfwSystemInit :: proc() {
+    when ODIN_OS == .Linux {
+        name:linux.UTS_Name
+		err := linux.uname(&name)
+        if err != .NONE do panicLog("linux.uname : ", err)
+
+        linuxPlatform.sysName = strings.clone_from_ptr(&name.sysname[0], bytes.index_byte(name.sysname[:], 0))
+        linuxPlatform.nodeName = strings.clone_from_ptr(&name.nodename[0], bytes.index_byte(name.nodename[:], 0))
+        linuxPlatform.machine = strings.clone_from_ptr(&name.machine[0], bytes.index_byte(name.machine[:], 0))
+        linuxPlatform.release = strings.clone_from_ptr(&name.release[0], bytes.index_byte(name.release[:], 0))
+        linuxPlatform.version = strings.clone_from_ptr(&name.version[0], bytes.index_byte(name.version[:], 0))
+	} else when ODIN_OS == .Windows {
+		//TODO
+	}
+}
+
 glfwSystemStart :: proc() {
+
+
     glfwMonitorProc :: proc "c" (monitor: glfw.MonitorHandle, event: c.int) {
         sync.mutex_lock(&monitorsMtx)
         defer sync.mutex_unlock(&monitorsMtx)
@@ -139,7 +178,6 @@ glfwSystemStart :: proc() {
             }
         }
     }
-
     //Unless you will be using OpenGL or OpenGL ES with the same window as Vulkan, there is no need to create a context. You can disable context creation with the GLFW_CLIENT_API hint.
     glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
 
@@ -155,13 +193,24 @@ glfwDestroy :: proc() {
 
 glfwSystemDestroy :: proc() {
     delete(glfwMonitors)
+
+    when ODIN_OS == .Linux {
+        delete(linuxPlatform.sysName)
+        delete(linuxPlatform.nodeName)
+        delete(linuxPlatform.machine)
+        delete(linuxPlatform.release)
+        delete(linuxPlatform.version)
+	} else when ODIN_OS == .Windows {
+		//TODO
+	}
+  
     glfw.Terminate()
 }
 
 glfwLoop :: proc() {
     glfwKeyProc :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: c.int) {
         //glfw.KEY_SPACE
-        if key > KEY_SIZE-1 || key < 0 || !IsValidEnumValue(KeyCode, key) {
+        if key > KEY_SIZE-1 || key < 0 || !xreflect.IsValidEnumValue(KeyCode, key) {
             return
         }
         switch action {
@@ -207,7 +256,9 @@ glfwLoop :: proc() {
         __windowWidth = u32(width)
         __windowHeight = u32(height)
 
-        intrinsics.atomic_store_explicit(&sizeUpdated, false, .Release)
+        if loopStart {
+            intrinsics.atomic_store_explicit(&sizeUpdated, true, .Release)
+        }
     }
     glfwWindowPosProc :: proc "c" (window: glfw.WindowHandle, xpos, ypos: c.int) {
         __windowX = xpos

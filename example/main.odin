@@ -9,7 +9,7 @@ is_android :: xfit.is_android
 Init ::proc() {
 
 }
-// Update ::proc(dt:f64) {
+// Update ::proc() {
     
 // }
 // Destroy ::proc() {
