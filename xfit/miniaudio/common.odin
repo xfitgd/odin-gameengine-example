@@ -1,6 +1,7 @@
 package miniaudio
 
 import "core:c"
+import "../xlibrary"
 
 MINIAUDIO_SHARED :: #config(MINIAUDIO_SHARED, false)
 
@@ -8,40 +9,13 @@ when MINIAUDIO_SHARED {
 	#panic("Shared linking for miniaudio is not supported yet")
 }
 
-is_android :: #config(__ANDROID__, false)
-is_mobile :: is_android
-
-when !is_mobile {
-	when ODIN_OS == .Windows {
-		//TODO
-	} else when ODIN_OS == .Darwin {
-		//TODO
-	} else {
-		when ODIN_ARCH == .amd64 {
-			@(private) ARCH_end :: "_amd64.a"
-		} else when ODIN_ARCH == .i386 {
-			@(private) ARCH_end :: "_i386.a"
-		} else when ODIN_ARCH == .arm64 {
-			@(private) ARCH_end :: "_arm64.a"
-		} else when ODIN_ARCH == .riscv64 {
-			@(private) ARCH_end :: "_riscv64.a"
-		} else when ODIN_ARCH == .arm32 {
-			@(private) ARCH_end :: "_arm32.a"
-		}
-		LIB :: "../lib/linux/miniaudio/libminiaudio" + ARCH_end
-		LIBOGG :: "../lib/linux/ogg/libogg" + ARCH_end
-		LIBVORBIS :: "../lib/linux/vorbis/libvorbis" + ARCH_end
-		LIBVORBISENC :: "../lib/linux/vorbis/libvorbisenc" + ARCH_end
-		LIBVORBISFILE :: "../lib/linux/vorbis/libvorbisfile" + ARCH_end
-		LIBOPUS :: "../lib/linux/opus/libopus" + ARCH_end
-		LIBOPUSFILE :: "../lib/linux/opusfile/libopusfile" + ARCH_end
-	}
-} else {
-	//TODO
-	when is_android {
-
-	}
-}
+LIB :: xlibrary.LIBPATH + "/miniaudio/libminiaudio" + xlibrary.ARCH_end
+LIBOGG :: xlibrary.LIBPATH + "/ogg/libogg" + xlibrary.ARCH_end
+LIBVORBIS :: xlibrary.LIBPATH + "/vorbis/libvorbis" + xlibrary.ARCH_end
+LIBVORBISENC :: xlibrary.LIBPATH + "/vorbis/libvorbisenc" + xlibrary.ARCH_end
+LIBVORBISFILE :: xlibrary.LIBPATH + "/vorbis/libvorbisfile" + xlibrary.ARCH_end
+LIBOPUS :: xlibrary.LIBPATH + "/opus/libopus" + xlibrary.ARCH_end
+LIBOPUSFILE :: xlibrary.LIBPATH + "/opusfile/libopusfile" + xlibrary.ARCH_end
 
 foreign import lib {
 	LIB,

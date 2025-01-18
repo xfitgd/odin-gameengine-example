@@ -28,8 +28,8 @@ when ODIN_OS == .Windows {
 	} else when ODIN_ARCH == .arm32 {
 		@(private) LIBGLFW3 :: "../../lib/linux/glfw/libglfw3_arm32.a"
 	}
-	foreign import glfw { LIBGLFW3 }
 }
+foreign import glfw { LIBGLFW3 }
 }
 
 #assert(size_of(c.int) == size_of(b32))

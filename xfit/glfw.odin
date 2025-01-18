@@ -5,7 +5,9 @@ import "glfw"
 import "xreflect"
 import "core:c"
 import "core:sync"
+import "core:os"
 import "core:sys/linux"
+import "core:sys/posix"
 import "core:sys/windows"
 import "core:strings"
 import "core:bytes"
@@ -141,9 +143,13 @@ glfwSystemInit :: proc() {
         linuxPlatform.machine = strings.clone_from_ptr(&name.machine[0], bytes.index_byte(name.machine[:], 0))
         linuxPlatform.release = strings.clone_from_ptr(&name.release[0], bytes.index_byte(name.release[:], 0))
         linuxPlatform.version = strings.clone_from_ptr(&name.version[0], bytes.index_byte(name.version[:], 0))
+
+        processorCoreLen = auto_cast os._unix_get_nprocs()
 	} else when ODIN_OS == .Windows {
 		//TODO
 	}
+
+    if processorCoreLen == 0 do panicLog("processorCoreLen can't zero")
 }
 
 glfwSystemStart :: proc() {

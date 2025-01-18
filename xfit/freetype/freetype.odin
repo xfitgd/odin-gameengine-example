@@ -1,12 +1,15 @@
 package freetype
 
 import "core:c"
+import "../xlibrary"
 
-when ODIN_OS == .Windows {
-    foreign import freetype "freetype.lib"
-} else when ODIN_OS == .Linux {
-    foreign import freetype "freetype.a"
+FREETYPE_SHARED :: #config(FREETYPE_SHARED, false)
+when FREETYPE_SHARED {
+	#panic("Shared linking for freetype is not supported yet")
 }
+
+LIB :: xlibrary.LIBPATH + "/freetype/libfreetype" + xlibrary.ARCH_end
+foreign import freetype { LIB }
 
 Library       :: distinct rawptr
 
@@ -14,7 +17,6 @@ Bool          :: distinct c.uchar
 F26Dot6       :: distinct c.long
 Fixed         :: distinct c.long
 Pos           :: distinct c.long
-
 
 
 Error :: enum c.int {
