@@ -90,6 +90,7 @@ main :: proc() {
 			out_path, 
 			o, 
 			"-debug" if debug else ({}),
+			"-sanitize:address" if debug else ({}),
 			({}) if !is_android else "-define:__ANDROID__=true"},
 			stdout  = w,
 			stderr  = w,
@@ -99,6 +100,7 @@ main :: proc() {
 		output, err2 := os2.read_entire_file_from_file(r, context.temp_allocator)
 		if err2 != nil do fmt.panicf("read_entire_file_from_file %v", err)
 
+		
 		if err != nil {
 			fmt.eprint(string(output))
 			fmt.panicf("%v", err)

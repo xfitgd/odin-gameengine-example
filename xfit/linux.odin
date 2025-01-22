@@ -44,7 +44,7 @@ package xfit
 // 			}
 // 		}
 // 		if mode_ == nil do continue
-// 		append(
+// 		non_zero_append(
 // 			&monitors,
 // 			monitorInfo {
 // 				isPrimary = i == i32(defScreenIdx),

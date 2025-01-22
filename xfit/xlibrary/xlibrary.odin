@@ -28,3 +28,5 @@ when !is_mobile {
         LIBPATH :: "../lib/android"
 	}
 }
+
+EXTERNAL_LIBPATH :: "../" + LIBPATH

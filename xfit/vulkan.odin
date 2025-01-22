@@ -10,7 +10,7 @@ import "core:strings"
 import "core:reflect"
 import "core:sync"
 import vk "vendor:vulkan"
-import "glfw"
+import "external/glfw"
 
 vkInstance: vk.Instance
 vkDevice: vk.Device
@@ -372,12 +372,12 @@ vkColorHasTransferDstOptimal:=false
 initSwapChain :: proc() {
 	fmtCnt:u32
 	vk.GetPhysicalDeviceSurfaceFormatsKHR(vkPhysicalDevice, vkSurface, &fmtCnt, nil)
-	vkFmts = make([]vk.SurfaceFormatKHR, fmtCnt)
+	vkFmts = make_non_zeroed([]vk.SurfaceFormatKHR, fmtCnt)
 	vk.GetPhysicalDeviceSurfaceFormatsKHR(vkPhysicalDevice, vkSurface, &fmtCnt, raw_data(vkFmts))
 
 	presentModeCnt:u32
 	vk.GetPhysicalDeviceSurfacePresentModesKHR(vkPhysicalDevice, vkSurface, &presentModeCnt, nil)
-	vkPresentModes := make([]vk.PresentModeKHR, presentModeCnt)
+	vkPresentModes := make_non_zeroed([]vk.PresentModeKHR, presentModeCnt)
 	vk.GetPhysicalDeviceSurfacePresentModesKHR(vkPhysicalDevice, vkSurface, &presentModeCnt, raw_data(vkPresentModes))
 
 	for f in vkFmts {
@@ -543,11 +543,11 @@ createSwapChainAndImageViews :: proc() {
 	if res != .SUCCESS do panicLog("res = vk.CreateSwapchainKHR(vkDevice, &swapChainCreateInfo, nil, &vkSwapchain) : ", res)
 
 	vk.GetSwapchainImagesKHR(vkDevice, vkSwapchain, &__swapImgCnt, nil)
-	swapImgs:= make([]vk.Image, __swapImgCnt, context.temp_allocator)
+	swapImgs:= make_non_zeroed([]vk.Image, __swapImgCnt, context.temp_allocator)
 	defer delete(swapImgs, context.temp_allocator)
 
 	for img, i in swapImgs {
-		
+		//TODO
 	}
 } 
 
@@ -587,17 +587,17 @@ vkStart :: proc() {
 		glfwExtensions = glfw.GetRequiredInstanceExtensions()
 		glfwLen = len(glfwExtensions)
 	}
-	instanceExtNames :[dynamic]cstring = make([dynamic]cstring, 0, len(INSTANCE_EXTENSIONS) + 3 + glfwLen, context.temp_allocator)
+	instanceExtNames :[dynamic]cstring = make_non_zeroed([dynamic]cstring, 0, len(INSTANCE_EXTENSIONS) + 3 + glfwLen, context.temp_allocator)
 	defer delete(instanceExtNames)
-	layerNames := make([dynamic]cstring, 0, len(LAYERS), context.temp_allocator)
+	layerNames := make_non_zeroed([dynamic]cstring, 0, len(LAYERS), context.temp_allocator)
 	defer delete(layerNames)
 
-	append(&instanceExtNames, vk.KHR_SURFACE_EXTENSION_NAME)
+	non_zero_append(&instanceExtNames, vk.KHR_SURFACE_EXTENSION_NAME)
 
 	layerPropCnt: u32
 	vk.EnumerateInstanceLayerProperties(&layerPropCnt, nil)
 
-	availableLayers := make([]vk.LayerProperties, layerPropCnt, context.temp_allocator)
+	availableLayers := make_non_zeroed([]vk.LayerProperties, layerPropCnt, context.temp_allocator)
 	defer delete(availableLayers, context.temp_allocator)
 
 	vk.EnumerateInstanceLayerProperties(&layerPropCnt, &availableLayers[0])
@@ -609,7 +609,7 @@ vkStart :: proc() {
 				when !ODIN_DEBUG {
 					if LAYERS[i] == "VK_LAYER_KHRONOS_validation" do continue
 				}
-				append(&layerNames, LAYERS[i])
+				non_zero_append(&layerNames, LAYERS[i])
 				LAYERS_CHECK[i] = true
 				when is_log do printfln(
 					"XFIT SYSLOG : vulkan %s instance layer support",
@@ -621,7 +621,7 @@ vkStart :: proc() {
 	instanceExtCnt: u32
 	vk.EnumerateInstanceExtensionProperties(nil, &instanceExtCnt, nil)
 
-	availableInstanceExts := make([]vk.ExtensionProperties, instanceExtCnt, context.temp_allocator)
+	availableInstanceExts := make_non_zeroed([]vk.ExtensionProperties, instanceExtCnt, context.temp_allocator)
 	defer delete(availableInstanceExts, context.temp_allocator)
 
 	vk.EnumerateInstanceExtensionProperties(nil, &instanceExtCnt, &availableInstanceExts[0])
@@ -630,7 +630,7 @@ vkStart :: proc() {
 		for _, i in INSTANCE_EXTENSIONS {
 			if !LAYERS_CHECK[i] &&
 			   mem.compare((transmute([^]byte)INSTANCE_EXTENSIONS[i])[:len(INSTANCE_EXTENSIONS[i])], e.extensionName[:len(INSTANCE_EXTENSIONS[i])]) == 0 {
-				append(&instanceExtNames, INSTANCE_EXTENSIONS[i])
+				non_zero_append(&instanceExtNames, INSTANCE_EXTENSIONS[i])
 				INSTANCE_EXTENSIONS_CHECK[i] = true
 				when is_log do printfln(
 					"XFIT SYSLOG : vulkan %s instance ext support",
@@ -640,7 +640,7 @@ vkStart :: proc() {
 		}
 	}
 	if validation_layer_support() {
-		append(&instanceExtNames, vk.EXT_DEBUG_UTILS_EXTENSION_NAME)
+		non_zero_append(&instanceExtNames, vk.EXT_DEBUG_UTILS_EXTENSION_NAME)
 
 		when is_log do println("XFIT SYSLOG : vulkan validation layer enable")
 	} else {
@@ -648,11 +648,11 @@ vkStart :: proc() {
 	}
 
 	when is_android {
-		append(&instanceExtNames, "VK_KHR_android_surface")
+		non_zero_append(&instanceExtNames, "VK_KHR_android_surface")
 	} else when ODIN_OS == .Linux {
-		append(&instanceExtNames, "VK_KHR_xlib_surface")
+		non_zero_append(&instanceExtNames, "VK_KHR_xlib_surface")
 	} else when ODIN_OS == .Windows {
-		append(&instanceExtNames, vk.KHR_WIN32_SURFACE_EXTENSION_NAME)
+		non_zero_append(&instanceExtNames, vk.KHR_WIN32_SURFACE_EXTENSION_NAME)
 	}
 
 	when !is_mobile {
@@ -661,7 +661,7 @@ vkStart :: proc() {
 			for &ext in instanceExtNames[:insLen] {
 				if strings.compare(string(glfw), string(ext)) == 0 do continue con
 			}
-			append(&instanceExtNames, glfw)
+			non_zero_append(&instanceExtNames, glfw)
 		}
 	}
 
@@ -704,14 +704,14 @@ vkStart :: proc() {
 
 	physicalDeviceCnt: u32
 	vk.EnumeratePhysicalDevices(vkInstance, &physicalDeviceCnt, nil)
-	vkPhysicalDevices := make([]vk.PhysicalDevice, physicalDeviceCnt, context.temp_allocator)
+	vkPhysicalDevices := make_non_zeroed([]vk.PhysicalDevice, physicalDeviceCnt, context.temp_allocator)
 	defer delete(vkPhysicalDevices, context.temp_allocator)
 	vk.EnumeratePhysicalDevices(vkInstance, &physicalDeviceCnt, &vkPhysicalDevices[0])
 
 	out: for pd in vkPhysicalDevices {
 		queueFamilyPropCnt: u32
 		vk.GetPhysicalDeviceQueueFamilyProperties(pd, &queueFamilyPropCnt, nil)
-		queueFamilies := make([]vk.QueueFamilyProperties, queueFamilyPropCnt, context.temp_allocator)
+		queueFamilies := make_non_zeroed([]vk.QueueFamilyProperties, queueFamilyPropCnt, context.temp_allocator)
 		defer delete(queueFamilies, context.temp_allocator)
 		vk.GetPhysicalDeviceQueueFamilyProperties(pd, &queueFamilyPropCnt, &queueFamilies[0])
 
@@ -752,19 +752,19 @@ vkStart :: proc() {
 
 	deviceExtCnt: u32
 	vk.EnumerateDeviceExtensionProperties(vkPhysicalDevice, nil, &deviceExtCnt, nil)
-	deviceExts := make([]vk.ExtensionProperties, deviceExtCnt, context.temp_allocator)
+	deviceExts := make_non_zeroed([]vk.ExtensionProperties, deviceExtCnt, context.temp_allocator)
 	defer delete(deviceExts, context.temp_allocator)
 	vk.EnumerateDeviceExtensionProperties(vkPhysicalDevice, nil, &deviceExtCnt, &deviceExts[0])
 
-	deviceExtNames := make([dynamic]cstring, 0, len(DEVICE_EXTENSIONS) + 1, context.temp_allocator)
+	deviceExtNames := make_non_zeroed([dynamic]cstring, 0, len(DEVICE_EXTENSIONS) + 1, context.temp_allocator)
 	defer delete(deviceExtNames)
-	append(&deviceExtNames, vk.KHR_SWAPCHAIN_EXTENSION_NAME)
+	non_zero_append(&deviceExtNames, vk.KHR_SWAPCHAIN_EXTENSION_NAME)
 
 	for &e in deviceExts {
 		for _, i in DEVICE_EXTENSIONS {
 			if !DEVICE_EXTENSIONS_CHECK[i] &&
 			   mem.compare((transmute([^]byte)DEVICE_EXTENSIONS[i])[:len(DEVICE_EXTENSIONS[i])],e.extensionName[:len(DEVICE_EXTENSIONS[i])]) == 0 {
-				append(&instanceExtNames, DEVICE_EXTENSIONS[i])
+				non_zero_append(&instanceExtNames, DEVICE_EXTENSIONS[i])
 				DEVICE_EXTENSIONS_CHECK[i] = true
 				when is_log do printfln(
 					"XFIT SYSLOG : vulkan %s device ext support",
@@ -1008,7 +1008,6 @@ vkWaitDeviceIdle :: proc() {
 }
 
 vkWaitGraphicsIdle :: proc() {
-
 	res := vk.QueueWaitIdle(vkGraphicsQueue)
 	if res != .SUCCESS do panicLog("vkWaitGraphicsIdle : ", res )
 }
@@ -1018,6 +1017,30 @@ vkWaitPresentIdle :: proc() {
 	if res != .SUCCESS do panicLog("vkWaitPresentIdle : ", res )
 }
 
-vkDrawFrame :: proc() {
+vkRecreateSwapChain :: proc() {
+	//TODO
+}
 
+vkRecreateSurface :: proc() {
+	//TODO
+}
+
+vkRecordCommandBuffer :: proc() {
+	//TODO
+}
+
+vkDrawFrame :: proc() {
+	//TODO
+}
+
+vkRefreshPreMatrix :: proc() {
+	//TODO
+}
+
+vkCreateSyncObject :: proc() {
+	//TODO
+}
+
+vkCleanUpSyncObject :: proc() {
+	//TODO
 }

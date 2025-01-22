@@ -14,7 +14,7 @@ import "core:sync"
 import "core:strings"
 import "base:runtime"
 import "core:debug/trace"
-import "glfw"
+import "external/glfw"
 
 
 @(private) KEY_SIZE :: 512

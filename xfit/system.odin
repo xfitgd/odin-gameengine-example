@@ -141,7 +141,7 @@ xfitMain :: proc(
 
 systemInit :: proc() {
 	xpanic.Start()
-	monitors = make([dynamic]MonitorInfo)
+	monitors = make_non_zeroed([dynamic]MonitorInfo)
 	when is_android {
 		//TODO
 	} else {
@@ -170,6 +170,32 @@ systemAfterDestroy :: proc() {
 	delete(monitors)
 }
 
+@private @thread_local trackAllocator:mem.Tracking_Allocator
+
+StartTrackingAllocator :: proc() {
+	when ODIN_DEBUG {
+		mem.tracking_allocator_init(&trackAllocator, context.allocator)
+		context.allocator = mem.tracking_allocator(&trackAllocator)
+	}
+}
+
+DestroyTrackAllocator :: proc() {
+	when ODIN_DEBUG {
+		if len(trackAllocator.allocation_map) > 0 {
+			fmt.eprintf("=== %v allocations not freed: ===\n", len(trackAllocator.allocation_map))
+			for _, entry in trackAllocator.allocation_map {
+				fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
+			}
+		}
+		if len(trackAllocator.bad_free_array) > 0 {
+			fmt.eprintf("=== %v incorrect frees: ===\n", len(trackAllocator.bad_free_array))
+			for entry in trackAllocator.bad_free_array {
+				fmt.eprintf("- %p @ %v\n", entry.memory, entry.location)
+			}
+		}
+		mem.tracking_allocator_destroy(&trackAllocator)
+	}
+}
 
 
 when is_android {
@@ -251,4 +277,69 @@ SecondToNanoSecond :: #force_inline proc "contextless" (_int: $T, _dec: T) -> T 
 
 SecondToNanoSecond2 :: #force_inline proc "contextless" (_sec: $T, _milisec: T, _usec: T, _nsec: T) -> T where intrinsics.type_is_integer(T) {
     return _sec * 1000000000 + _milisec * 1000000 + _usec * 1000 + _nsec
+}
+
+make_non_zeroed :: proc {
+	make_non_zeroed_slice,
+	make_non_zeroed_dynamic_array,
+	make_non_zeroed_dynamic_array_len,
+	make_non_zeroed_dynamic_array_len_cap,
+
+	//make_non_zeroed_map,
+	//make_non_zeroed_map_cap, //?no required
+	make_non_zeroed_multi_pointer,
+
+	//TODO
+	// make_non_zeroed_soa_slice,
+	// make_non_zeroed_soa_dynamic_array,
+	// make_non_zeroed_soa_dynamic_array_len,
+	// make_non_zeroed_soa_dynamic_array_len_cap,
+}
+
+@(require_results)
+make_non_zeroed_slice :: proc($T: typeid/[]$E, #any_int len: int, allocator := context.allocator, loc := #caller_location) -> (T, runtime.Allocator_Error) #optional_allocator_error {
+	runtime.make_slice_error_loc(loc, len)
+	data, err := runtime.mem_alloc_non_zeroed(size_of(E)*len, align_of(E), allocator, loc)
+	if data == nil && size_of(E) != 0 {
+		return nil, err
+	}
+	s := runtime.Raw_Slice{raw_data(data), len}
+	return transmute(T)s, err
+}
+
+@(require_results)
+make_non_zeroed_dynamic_array :: proc($T: typeid/[dynamic]$E, allocator := context.allocator, loc := #caller_location) -> (T, runtime.Allocator_Error) #optional_allocator_error {
+	return make_dynamic_array_len_cap(T, 0, 0, allocator, loc)
+}
+
+@(require_results)
+make_non_zeroed_dynamic_array_len :: proc($T: typeid/[dynamic]$E,  #any_int len: int, allocator := context.allocator, loc := #caller_location) -> (T, runtime.Allocator_Error) #optional_allocator_error {
+	return make_dynamic_array_len_cap(T, len, len, allocator, loc)
+}
+
+@(require_results)
+make_non_zeroed_dynamic_array_len_cap :: proc($T: typeid/[dynamic]$E, #any_int len: int, #any_int cap: int, allocator := context.allocator, loc := #caller_location) -> (array: T, err: runtime.Allocator_Error) #optional_allocator_error {
+	runtime.make_dynamic_array_error_loc(loc, 0, 0)
+
+	raw_array := (^runtime.Raw_Dynamic_Array)(&array)
+
+	raw_array.allocator = allocator // initialize allocator before just in case it fails to allocate any memory
+	data := runtime.mem_alloc_non_zeroed(size_of(E) * cap, align_of(E), allocator, loc) or_return
+	use_zero := data == nil /*&& size_of(E) != 0*/
+	raw_array.data = raw_data(data)
+	raw_array.len = 0 if use_zero else len
+	raw_array.cap = 0 if use_zero else cap
+	raw_array.allocator = allocator
+	return
+}
+
+@(require_results)
+make_non_zeroed_multi_pointer :: proc($T: typeid/[^]$E, #any_int len: int, allocator := context.allocator, loc := #caller_location) -> (mp: T, err: runtime.Allocator_Error) #optional_allocator_error {
+	runtime.make_slice_error_loc(loc, len)
+	data := runtime.mem_alloc_non_zeroed(size_of(E)*len, align_of(E), allocator, loc) or_return
+	if data == nil && size_of(E) != 0 {
+		return
+	}
+	mp = cast(T)raw_data(data)
+	return
 }

@@ -1,6 +1,6 @@
 package xfit
 
-import "miniaudio"
+import "external/miniaudio"
 import "core:sync"
 import "core:thread"
 import "base:intrinsics"
@@ -13,6 +13,12 @@ import "core:c/libc"
 }
 
 SoundError :: miniaudio.result
+SoundErrorFuncNames :: enum {
+    NONE,
+    decoder_init_memory,
+    data_source_get_data_format,
+    decode_memory,
+}
 
 Sound :: struct {
     src:^SoundSrc,
@@ -46,7 +52,7 @@ SoundSrc :: struct {
 
 @private soundStart :: proc() {
     gSounds = make(map[^Sound]^Sound)
-    gEndSounds = make([dynamic]^Sound)
+    gEndSounds = make_non_zeroed([dynamic]^Sound)
 
     resourceManagerConfig := miniaudio.resource_manager_config_init()
     miniaudio_pCustomBackendVTables[0] = &miniaudio.g_decoding_backend_vtable_libopus
@@ -110,7 +116,7 @@ Sound_Deinit :: proc(self:^Sound) {
 
     context = runtime.default_context()
     sync.mutex_lock(&gEndSoundsMtx)
-    append(&gEndSounds, self)
+    non_zero_append(&gEndSounds, self)
     sync.mutex_unlock(&gEndSoundsMtx)
     sync.sema_post(&gSema)
 }
@@ -181,5 +187,118 @@ SoundSrc_PlaySoundMemory :: proc(self:^SoundSrc, volume:f32, loop:bool) -> (snd:
     sync.mutex_lock(&gSoundsMtx)
     map_insert(&gSounds, snd, snd)
     sync.mutex_unlock(&gSoundsMtx)
+    return
+}
+
+SetVolume :: #force_inline proc "contextless" (self:^Sound, volume:f32) {
+    miniaudio.sound_set_volume(&self.__private.__miniaudio_sound, volume)
+}
+
+//= playing speed
+SetPitch :: #force_inline proc "contextless" (self:^Sound, pitch:f32) {
+    miniaudio.sound_set_pitch(&self.__private.__miniaudio_sound, pitch)
+}
+
+Pause :: #force_inline proc "contextless" (self:^Sound) {
+    res := miniaudio.sound_stop(&self.__private.__miniaudio_sound)
+    if res != .SUCCESS do panicLog(res)
+}
+
+Resume :: #force_inline proc "contextless" (self:^Sound) {
+   res := miniaudio.sound_start(&self.__private.__miniaudio_sound)
+   if res != .SUCCESS do panicLog(res)
+}
+
+@require_results GetLenSec :: #force_inline proc "contextless" (self:^Sound) -> f32 {
+    sec:f32
+    res := miniaudio.sound_get_length_in_seconds(&self.__private.__miniaudio_sound, &sec)
+    if res != .SUCCESS do panicLog(res)
+    return sec
+}
+
+@require_results GetLen :: #force_inline proc "contextless" (self:^Sound) -> u64 {
+    frames:u64
+    res := miniaudio.sound_get_length_in_pcm_frames(&self.__private.__miniaudio_sound, &frames)
+    if res != .SUCCESS do panicLog(res)
+    return frames
+}
+
+@require_results GetPosSec :: #force_inline proc "contextless" (self:^Sound) -> f32 {
+    sec:f32
+    res := miniaudio.sound_get_cursor_in_seconds(&self.__private.__miniaudio_sound, &sec)
+    if res != .SUCCESS do panicLog(res)
+    return sec
+}
+
+@require_results GetPos :: #force_inline proc "contextless" (self:^Sound) -> u64 {
+    frames:u64
+    res := miniaudio.sound_get_cursor_in_pcm_frames(&self.__private.__miniaudio_sound, &frames)
+    if res != .SUCCESS do panicLog(res)
+    return frames
+}
+
+SetPos :: #force_inline proc "contextless" (self:^Sound, pos:u64) {
+    res := miniaudio.sound_seek_to_pcm_frame(&self.__private.__miniaudio_sound, pos)
+    if res != .SUCCESS do panicLog(res)
+}
+
+SetPosSec :: #force_inline proc "contextless" (self:^Sound, posSec:f32) -> bool {
+    pos:u64 = u64(f64(posSec) * f64(self.src.sampleRate))
+    if pos >= GetLen(self) do return false
+    res := miniaudio.sound_seek_to_pcm_frame(&self.__private.__miniaudio_sound, pos)
+    if res != .SUCCESS do panicLog(res)
+    return true
+}
+
+SetLooping :: #force_inline proc "contextless" (self:^Sound, loop:bool) {
+    miniaudio.sound_set_looping(&self.__private.__miniaudio_sound, auto_cast loop)
+}
+
+@require_results IsLooping :: #force_inline proc "contextless" (self:^Sound) -> bool {
+   return auto_cast miniaudio.sound_is_looping(&self.__private.__miniaudio_sound)
+}
+
+@require_results IsPlaying :: #force_inline proc "contextless" (self:^Sound) -> bool {
+    return auto_cast miniaudio.sound_is_playing(&self.__private.__miniaudio_sound)
+}
+
+@require_results SoundSrc_DecodeSoundMemory :: proc(data:[]byte) -> (result : ^SoundSrc, err: SoundError, errFunc:SoundErrorFuncNames = .NONE) {
+    if !intrinsics.atomic_load_explicit(&started, .Acquire) do soundStart()//?soundStart를 따로 호출하지 않고 최초로 사용할때 시작
+
+    result = new(SoundSrc)
+    defer if err != .SUCCESS do free(result)
+
+    decoderConfig := miniaudio.decoder_config_init_default()
+    decoderConfig.ppCustomBackendVTables = auto_cast &miniaudio_pCustomBackendVTables[0]
+    decoderConfig.customBackendCount = 2
+
+    decoder : miniaudio.decoder
+    err = miniaudio.decoder_init_memory(raw_data(data), len(data), &decoderConfig, &decoder)
+    if err != .SUCCESS {
+        errFunc = .decoder_init_memory
+        return
+    }
+
+    defer miniaudio.decoder_uninit(&decoder)
+
+    err = miniaudio.data_source_get_data_format(auto_cast &decoder, 
+        &result.format,
+        &result.channels,
+        &result.sampleRate,
+        nil,
+        0)
+    if err != .SUCCESS {
+        errFunc = .data_source_get_data_format
+        return
+    }
+
+    output:rawptr
+    err = miniaudio.decode_memory(raw_data(data), len(data), &decoderConfig, &result.sizeInFrames, &output)
+    if err != .SUCCESS {
+        errFunc = .decode_memory
+        return
+    }
+
+    result.outData = ([^]byte)(output)[:result.sizeInFrames * u64(result.channels)]
     return
 }

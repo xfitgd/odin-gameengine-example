@@ -183,7 +183,7 @@ vkInitBlockLen :: proc() {
 }
 
 vkAllocatorInit :: proc() {
-	gVkMemIdxCnts = make([]uint, vkPhysicalMemProp.memoryTypeCount)
+	gVkMemIdxCnts = make_non_zeroed([]uint, vkPhysicalMemProp.memoryTypeCount)
 	mem.zero_slice(gVkMemIdxCnts)
 
 	defAllocator := runtime.default_allocator()
@@ -212,18 +212,19 @@ vkAllocatorInit :: proc() {
 	}
 	vk.AllocateCommandBuffers(vkDevice, &cmdAllocInfo, &gCmd)
 
+
 	fenceInfo := vk.FenceCreateInfo {
 		sType = .FENCE_CREATE_INFO,
 		flags = {.SIGNALED},
 	}
 	vk.CreateFence(vkDevice, &fenceInfo, nil, &gFence)
 
-	opQueue = make([dynamic]OpNode, vkArenaAllocator)
-	opSaveQueue = make([dynamic]OpNode, vkArenaAllocator)
-	opMapQueue = make([dynamic]OpNode, vkArenaAllocator)
-	opAllocQueue = make([dynamic]OpNode, vkArenaAllocator)
-	opDestroyQueue = make([dynamic]OpNode, vkArenaAllocator)
-	gVkUpdateDesciptorSetList = make([dynamic]vk.WriteDescriptorSet, vkArenaAllocator)
+	opQueue = make_non_zeroed([dynamic]OpNode, vkArenaAllocator)
+	opSaveQueue = make_non_zeroed([dynamic]OpNode, vkArenaAllocator)
+	opMapQueue = make_non_zeroed([dynamic]OpNode, vkArenaAllocator)
+	opAllocQueue = make_non_zeroed([dynamic]OpNode, vkArenaAllocator)
+	opDestroyQueue = make_non_zeroed([dynamic]OpNode, vkArenaAllocator)
+	gVkUpdateDesciptorSetList = make_non_zeroed([dynamic]vk.WriteDescriptorSet, vkArenaAllocator)
 }
 
 vkAllocatorDestroy :: proc() {
@@ -539,7 +540,7 @@ VkAllocatorError :: enum {
 		}
 
 		if !_BindBufferNode(memBuf, memType, vkResource, cellCnt, outIdx, &memBuf) do panicLog("")
-		append(&gVkMemBufs, memBuf)
+		non_zero_append(&gVkMemBufs, memBuf)
 	}
 	gVkMemIdxCnts[memBuf.allocateInfo.memoryTypeIndex] += 1
 	return
@@ -562,7 +563,7 @@ where T == vk.Buffer || T == vk.Image {
 
 	VkMemBuffer_BindBufferNode(memBuf, vkResource, 1) //can't (must no) error
 
-	append(&gVkMemBufs, memBuf)
+	non_zero_append(&gVkMemBufs, memBuf)
 	return
 }
 
@@ -583,8 +584,8 @@ where T == vk.Buffer || T == vk.Image {
 		_Handle :: #force_inline proc(n: $T, node: OpNode) -> bool {
 			if n.allocator != nil {
 				sync.atomic_mutex_lock(&gQueueMtx)
-				append(&opAllocQueue, node)
-				append(&opQueue, node)
+				non_zero_append(&opAllocQueue, node)
+				non_zero_append(&opQueue, node)
 				sync.atomic_mutex_unlock(&gQueueMtx)
 				return true
 			}
@@ -600,7 +601,7 @@ where T == vk.Buffer || T == vk.Image {
 		}
 	}
 	sync.atomic_mutex_lock(&gQueueMtx)
-	append(&opQueue, node)
+	non_zero_append(&opQueue, node)
 	sync.atomic_mutex_unlock(&gQueueMtx)
 }
 
@@ -608,10 +609,10 @@ where T == vk.Buffer || T == vk.Image {
 	#partial switch n in node {
 	case OpMapCopy, OpCreateBuffer, OpCreateTexture:
 		sync.atomic_mutex_lock(&gQueueMtx)
-		append(&opAllocQueue, node)
+		non_zero_append(&opAllocQueue, node)
 		sync.atomic_mutex_unlock(&gQueueMtx)
 	}
-	append(&opSaveQueue, node)
+	non_zero_append(&opSaveQueue, node)
 }
 
 
@@ -624,7 +625,7 @@ VkBufferResource_CreateBuffer :: #force_inline proc(
 ) {
 	self.option = option
 	if isCopy {
-		copyData := make([]byte, len(data.?), allocator.?)
+		copyData := make_non_zeroed([]byte, len(data.?), allocator.?)
 		mem.copy(raw_data(copyData), raw_data(data.?), len(data.?))
 		AppendOp(OpCreateBuffer{src = self, data = copyData, allocator = allocator})
 	} else {
@@ -642,7 +643,7 @@ VkBufferResource_CreateTexture :: #force_inline proc(
 	self.sampler = sampler
 	self.option = option
 	if isCopy {
-		copyData := make([]byte, len(data.?), allocator.?)
+		copyData := make_non_zeroed([]byte, len(data.?), allocator.?)
 		mem.copy(raw_data(copyData), raw_data(data.?), len(data.?))
 		AppendOp(OpCreateTexture{src = self, data = copyData, allocator = allocator})
 	} else {
@@ -702,7 +703,7 @@ VkBufferResource_CopyUpdateSlice :: #force_inline proc(
 	allocator: runtime.Allocator,
 ) {
 	bytes := mem.slice_to_bytes(data)
-	copyData := make([]byte, len(bytes), allocator)
+	copyData := make_non_zeroed([]byte, len(bytes), allocator)
 	mem_copy(copyData, bytes, len(bytes))
 
 	VkBufferResource_MapCopy(self, copyData, allocator)
@@ -713,7 +714,7 @@ VkBufferResource_CopyUpdate :: #force_inline proc(
 	allocator: runtime.Allocator,
 ) {
 	bytes := mem.ptr_to_bytes(data)
-	copyData := make([]byte, len(bytes), allocator)
+	copyData := make_non_zeroed([]byte, len(bytes), allocator)
 	mem_copy(copyData, bytes, len(bytes))
 
 	VkBufferResource_MapCopy(self, copyData, allocator)
@@ -933,7 +934,7 @@ VkBufferResource_Deinit :: proc(self: ^VkBaseResource) {
 	//?? no need? execute_register_descriptor_pool
 }
 @(private = "file") __CreateDescriptorPool :: proc(size:[]VkDescriptorPoolSize, out:^VkDescriptorPoolMem) {
-	poolSize :[]vk.DescriptorPoolSize = make([]vk.DescriptorPoolSize, len(size), vkArenaAllocator)
+	poolSize :[]vk.DescriptorPoolSize = make_non_zeroed([]vk.DescriptorPoolSize, len(size), vkArenaAllocator)
 	defer delete(poolSize, vkArenaAllocator)
 
 	for _, i in size {
@@ -956,15 +957,15 @@ VkBufferResource_Deinit :: proc(self: ^VkBaseResource) {
 			if raw_data(s.size) in gDesciptorPools {
 				pool = gDesciptorPools[raw_data(s.size)]
 			} else {
-				pool = make([dynamic]VkDescriptorPoolMem, vkArenaAllocator)
+				pool = make_non_zeroed([dynamic]VkDescriptorPoolMem, vkArenaAllocator)
 				gDesciptorPools[raw_data(s.size)] = pool
-				append(&pool, VkDescriptorPoolMem{cnt = 0})
+				non_zero_append(&pool, VkDescriptorPoolMem{cnt = 0})
 				__CreateDescriptorPool(s.size, &pool[0])
 			}
 
 			last := &pool[len(pool) - 1]
 			if last.cnt >= vkPoolBlock {
-				append(&pool, VkDescriptorPoolMem{cnt = 0})
+				non_zero_append(&pool, VkDescriptorPoolMem{cnt = 0})
 				last = &pool[len(pool) - 1]
 				__CreateDescriptorPool(s.size, last)
 			}
@@ -999,8 +1000,8 @@ VkBufferResource_Deinit :: proc(self: ^VkBaseResource) {
 			}
 		}
 
-		bufs := make([]vk.DescriptorBufferInfo, bufCnt, vkTempArenaAllocator)
-		texs := make([]vk.DescriptorImageInfo, texCnt, vkTempArenaAllocator)
+		bufs := make_non_zeroed([]vk.DescriptorBufferInfo, bufCnt, vkTempArenaAllocator)
+		texs := make_non_zeroed([]vk.DescriptorImageInfo, texCnt, vkTempArenaAllocator)
 		bufCnt = 0
 		texCnt = 0
 
@@ -1027,7 +1028,7 @@ VkBufferResource_Deinit :: proc(self: ^VkBaseResource) {
 		for n, i in s.size {	
 			switch n.type {
 				case .SAMPLER:
-					append(&gVkUpdateDesciptorSetList, vk.WriteDescriptorSet{
+					non_zero_append(&gVkUpdateDesciptorSetList, vk.WriteDescriptorSet{
 						dstSet = s.__set,
 						dstBinding = s.bindings[i],
 						dstArrayElement = 0,
@@ -1040,7 +1041,7 @@ VkBufferResource_Deinit :: proc(self: ^VkBaseResource) {
 					})
 					texCnt += n.cnt
 				case .UNIFORM:
-					append(&gVkUpdateDesciptorSetList, vk.WriteDescriptorSet{
+					non_zero_append(&gVkUpdateDesciptorSetList, vk.WriteDescriptorSet{
 						dstSet = s.__set,
 						dstBinding = s.bindings[i],
 						dstArrayElement = 0,
@@ -1099,10 +1100,10 @@ VkBufferResource_Deinit :: proc(self: ^VkBaseResource) {
 		#partial switch n in node {
 		case OpMapCopy:
 			if inoutMemBuf^ == nil {
-				append(&opMapQueue, n)
+				non_zero_append(&opMapQueue, n)
 				inoutMemBuf^ = n.resource.vkMemBuffer
 			} else if n.resource.vkMemBuffer == inoutMemBuf^ {
-				append(&opMapQueue, n)
+				non_zero_append(&opMapQueue, n)
 			}
 			node = nil
 		}
@@ -1115,11 +1116,7 @@ VkBufferResource_Deinit :: proc(self: ^VkBaseResource) {
 
 	ranges: []vk.MappedMemoryRange
 	if self.cache {
-		ranges = runtime.make_aligned(
-			[]vk.MappedMemoryRange,
-			len(nodes),
-			align_of(vk.MappedMemoryRange),
-		)
+		ranges = make_non_zeroed([]vk.MappedMemoryRange, len(nodes))
 
 		for i in 0 ..< len(nodes) {
 			idx: ^VkMemBufferNode = auto_cast (nodes[i].(OpMapCopy)).resource.idx
@@ -1278,9 +1275,9 @@ vkOpExecute :: proc(waitAndDestroy: bool) {
 	for &node in opSaveQueue {
 		#partial switch n in node {
 		case OpDestroyBuffer:
-			append(&opDestroyQueue, n)
+			non_zero_append(&opDestroyQueue, n)
 		case OpDestroyTexture:
-			append(&opDestroyQueue, n)
+			non_zero_append(&opDestroyQueue, n)
 		}
 	}
 	sync.atomic_mutex_unlock(&gDestroyQueueMtx)

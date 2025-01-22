@@ -1,7 +1,7 @@
 #+private
 package xfit
 
-import "glfw"
+import "external/glfw"
 import "xreflect"
 import "core:c"
 import "core:sync"
@@ -98,7 +98,7 @@ glfwVulkanStart :: proc "contextless" (surface: ^vk.SurfaceKHR) {
 }
 
 @(private="file") glfwInitMonitors :: proc() {
-    glfwMonitors = make([dynamic]glfw.MonitorHandle)
+    glfwMonitors = make_non_zeroed([dynamic]glfw.MonitorHandle)
     _monitors := glfw.GetMonitors()
 
     for m in _monitors {
@@ -128,8 +128,8 @@ glfwVulkanStart :: proc "contextless" (surface: ^vk.SurfaceKHR) {
         )
     }
 
-    append(&monitors, info)
-    append(&glfwMonitors, m)
+    non_zero_append(&monitors, info)
+    non_zero_append(&glfwMonitors, m)
 }
 
 glfwSystemInit :: proc() {
@@ -279,6 +279,10 @@ glfwLoop :: proc() {
             activated = true
         } else {
             activated = false
+
+            for &k in keys {
+                k = false
+            }
         }
         Activate()
     }
