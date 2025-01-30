@@ -1,4 +1,4 @@
-package xpanic
+package xfmt
 
 import "core:strings"
 import "core:fmt"
@@ -76,7 +76,12 @@ printTraceBuf :: proc(str:^strings.Builder) {
 
 	printTraceBuf(&str)
 
-	str2 := string(str.buf[:len(str.buf)])
+	printToFile(str.buf[:len(str.buf)])
+	panic(string(str.buf[:len(str.buf)]), loc)
+}
+
+@private printToFile :: proc(str:[]byte) {
+	str2 := string(str)
 	when !is_android {
 		if len(LOG_FILE_NAME) > 0 {
 			fd, err := os.open(LOG_FILE_NAME, os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0o644)
@@ -88,5 +93,45 @@ printTraceBuf :: proc(str:^strings.Builder) {
 	} else {
 		//TODO
 	}
-	panic(str2, loc)
+}
+
+printLog :: proc "contextless" (args: ..any) {
+	context = runtime.default_context()
+	str: strings.Builder
+	strings.builder_init(&str)
+	defer strings.builder_destroy(&str)
+	fmt.sbprint(&str, ..args)
+
+	printToFile(str.buf[:len(str.buf)])
+}
+
+
+printlnLog :: proc "contextless" (args: ..any) {
+	context = runtime.default_context()
+	str: strings.Builder
+	strings.builder_init(&str)
+	defer strings.builder_destroy(&str)
+	fmt.sbprintln(&str, ..args)
+
+	printToFile(str.buf[:len(str.buf)])
+}
+
+printfLog :: proc "contextless" (_fmt:string ,args: ..any) {
+	context = runtime.default_context()
+	str: strings.Builder
+	strings.builder_init(&str)
+	defer strings.builder_destroy(&str)
+	fmt.sbprintf(&str, _fmt, ..args)
+
+	printToFile(str.buf[:len(str.buf)])
+}
+
+printflnLog :: proc "contextless" (_fmt:string ,args: ..any) {
+	context = runtime.default_context()
+	str: strings.Builder
+	strings.builder_init(&str)
+	defer strings.builder_destroy(&str)
+	fmt.sbprintfln(&str, _fmt, ..args)
+
+	printToFile(str.buf[:len(str.buf)])
 }

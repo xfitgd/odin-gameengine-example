@@ -179,28 +179,28 @@ OPUS_RESET_STATE :: 4028
   * It is position independent and can be freely copied.
   * @see opus_encoder_create,opus_encoder_init
   */
-OpusEncoder :: distinct rawptr
+OpusEncoder :: struct {}
 
 /** Opus decoder state.
   * This contains the complete state of an Opus decoder.
   * It is position independent and can be freely copied.
   * @see opus_decoder_create,opus_decoder_init
   */
-OpusDecoder :: distinct rawptr
+OpusDecoder :: struct {}
 
 /** Opus DRED decoder.
   * This contains the complete state of an Opus DRED decoder.
   * It is position independent and can be freely copied.
   * @see opus_dred_decoder_create,opus_dred_decoder_init
   */
-OpusDREDDecoder :: distinct rawptr
+OpusDREDDecoder :: struct {}
 
 /** Opus DRED state.
   * This contains the complete state of an Opus DRED packet.
   * It is position independent and can be freely copied.
   * @see opus_dred_create,opus_dred_init
   */
-OpusDRED :: distinct rawptr
+OpusDRED :: struct {}
 
 /** @defgroup opus_repacketizer Repacketizer
 * @{
@@ -344,7 +344,7 @@ OpusDRED :: distinct rawptr
 * opus_repacketizer_cat() needs to be re-added to a newly reinitialized
 * repacketizer state.
 */
-OpusRepacketizer :: distinct rawptr
+OpusRepacketizer :: struct {}
 
 // opus.h end
 
@@ -353,8 +353,8 @@ OpusRepacketizer :: distinct rawptr
 OPUS_MULTISTREAM_GET_ENCODER_STATE_REQUEST :: 5120
 OPUS_MULTISTREAM_GET_DECODER_STATE_REQUEST :: 5122
 
-OpusMSEncoder :: distinct rawptr
-OpusMSDecoder :: distinct rawptr
+OpusMSEncoder :: struct {}
+OpusMSDecoder :: struct {}
 
 // opus_multistream.h end
 
@@ -364,8 +364,8 @@ OPUS_PROJECTION_GET_DEMIXING_MATRIX_GAIN_REQUEST :: 6001
 OPUS_PROJECTION_GET_DEMIXING_MATRIX_SIZE_REQUEST :: 6003
 OPUS_PROJECTION_GET_DEMIXING_MATRIX_REQUEST :: 6005
 
-OpusProjectionEncoder :: distinct rawptr
-OpusProjectionDecoder :: distinct rawptr
+OpusProjectionEncoder :: struct {}
+OpusProjectionDecoder :: struct {}
 
 // opus_projection.h end
 
@@ -417,7 +417,7 @@ foreign lib {
  * selected is too low. This also means that it is safe to always use 48 kHz stereo input
  * and let the encoder optimize the encoding.
  */
-  @(require_results) opus_encoder_create :: proc(Fs:opus_int32, channels:int, application:c.int, error:^c.int) -> OpusEncoder ---
+  @(require_results) opus_encoder_create :: proc(Fs:opus_int32, channels:int, application:c.int, error:^c.int) -> ^OpusEncoder ---
 
     /** Initializes a previously allocated encoder state
   * The memory pointed to by st must be at least the size returned by opus_encoder_get_size().
@@ -432,7 +432,7 @@ foreign lib {
   * @param [in] application <tt>int</tt>: Coding mode (one of OPUS_APPLICATION_VOIP, OPUS_APPLICATION_AUDIO, or OPUS_APPLICATION_RESTRICTED_LOWDELAY)
   * @retval #OPUS_OK Success or @ref opus_errorcodes
   */
-  opus_encoder_init :: proc(st:OpusEncoder, Fs:opus_int32, channels:c.int, application:c.int) -> c.int ---
+  opus_encoder_init :: proc(st:^OpusEncoder, Fs:opus_int32, channels:c.int, application:c.int) -> c.int ---
 
   /** Encodes an Opus frame.
   * @param [in] st <tt>OpusEncoder*</tt>: Encoder state
@@ -462,7 +462,7 @@ foreign lib {
   * @returns The length of the encoded packet (in bytes) on success or a
   *          negative error code (see @ref opus_errorcodes) on failure.
   */
-  @(require_results) opus_encode :: proc(st:OpusEncoder, pcm:[^]opus_int16, frame_size:c.int, data:[^]byte, max_data_bytes:opus_int32) -> opus_int32 ---
+  @(require_results) opus_encode :: proc(st:^OpusEncoder, pcm:[^]opus_int16, frame_size:c.int, data:[^]byte, max_data_bytes:opus_int32) -> opus_int32 ---
 
   /** Encodes an Opus frame from floating point input.
   * @param [in] st <tt>OpusEncoder*</tt>: Encoder state
@@ -497,12 +497,12 @@ foreign lib {
   * @returns The length of the encoded packet (in bytes) on success or a
   *          negative error code (see @ref opus_errorcodes) on failure.
   */
-  @(require_results) opus_encode_float :: proc(st:OpusEncoder, pcm:[^]c.float, frame_size:c.int, data:[^]byte, max_data_bytes:opus_int32) -> opus_int32 ---
+  @(require_results) opus_encode_float :: proc(st:^OpusEncoder, pcm:[^]c.float, frame_size:c.int, data:[^]byte, max_data_bytes:opus_int32) -> opus_int32 ---
 
   /** Frees an <code>OpusEncoder</code> allocated by opus_encoder_create().
   * @param[in] st <tt>OpusEncoder*</tt>: State to be freed.
   */
-  opus_encoder_destroy :: proc(st:OpusEncoder) ---
+  opus_encoder_destroy :: proc(st:^OpusEncoder) ---
 
   /** Perform a CTL function on an Opus encoder.
   *
@@ -515,7 +515,7 @@ foreign lib {
   * @see opus_genericctls
   * @see opus_encoderctls
   */
-  opus_encoder_ctl :: proc(st:OpusEncoder, request:c.int, #c_vararg args: ..any) -> c.int ---
+  opus_encoder_ctl :: proc(st:^OpusEncoder, request:c.int, #c_vararg args: ..any) -> c.int ---
 
   /** Gets the size of an <code>OpusDecoder</code> structure.
   * @param [in] channels <tt>int</tt>: Number of channels.
@@ -539,7 +539,7 @@ foreign lib {
   * rate. Likewise, the decoder is capable of filling in either mono or
   * interleaved stereo pcm buffers, at the caller's request.
   */
-  @(require_results) opus_decoder_create :: proc(Fs:opus_int32, channels:int, error:^c.int) -> OpusDecoder ---
+  @(require_results) opus_decoder_create :: proc(Fs:opus_int32, channels:int, error:^c.int) -> ^OpusDecoder ---
 
   /** Initializes a previously allocated decoder state.
   * The state must be at least the size returned by opus_decoder_get_size().
@@ -552,7 +552,7 @@ foreign lib {
   * @param [in] channels <tt>int</tt>: Number of channels (1 or 2) to decode
   * @retval #OPUS_OK Success or @ref opus_errorcodes
   */
-  opus_decoder_init :: proc(st:OpusDecoder, Fs:opus_int32, channels:c.int) -> c.int ---
+  opus_decoder_init :: proc(st:^OpusDecoder, Fs:opus_int32, channels:c.int) -> c.int ---
 
   /** Decode an Opus packet.
   * @param [in] st <tt>OpusDecoder*</tt>: Decoder state
@@ -570,7 +570,7 @@ foreign lib {
   *  decoded. If no such data is available, the frame is decoded as if it were lost.
   * @returns Number of decoded samples or @ref opus_errorcodes
   */
-  @(require_results) opus_decode :: proc(st:OpusDecoder, data:[^]byte, len:opus_int32, pcm:[^]opus_int16, frame_size:c.int, decode_fec:c.int) -> c.int ---
+  @(require_results) opus_decode :: proc(st:^OpusDecoder, data:[^]byte, len:opus_int32, pcm:[^]opus_int16, frame_size:c.int, decode_fec:c.int) -> c.int ---
 
   /** Decode an Opus packet with floating point output.
   * @param [in] st <tt>OpusDecoder*</tt>: Decoder state
@@ -588,7 +588,7 @@ foreign lib {
   *  decoded. If no such data is available the frame is decoded as if it were lost.
   * @returns Number of decoded samples or @ref opus_errorcodes
   */
-  @(require_results) opus_decode_float :: proc(st:OpusDecoder, data:[^]byte, len:opus_int32, pcm:[^]c.float, frame_size:c.int, decode_fec:c.int) -> c.int ---
+  @(require_results) opus_decode_float :: proc(st:^OpusDecoder, data:[^]byte, len:opus_int32, pcm:[^]c.float, frame_size:c.int, decode_fec:c.int) -> c.int ---
 
   /** Perform a CTL function on an Opus decoder.
   *
@@ -601,12 +601,12 @@ foreign lib {
   * @see opus_genericctls
   * @see opus_decoderctls
   */
-  opus_decoder_ctl :: proc(st:OpusDecoder, request:c.int, #c_vararg args: ..any) -> c.int ---
+  opus_decoder_ctl :: proc(st:^OpusDecoder, request:c.int, #c_vararg args: ..any) -> c.int ---
 
   /** Frees an <code>OpusDecoder</code> allocated by opus_decoder_create().
   * @param[in] st <tt>OpusDecoder*</tt>: State to be freed.
   */
-  opus_decoder_destroy :: proc(st:OpusDecoder) ---
+  opus_decoder_destroy :: proc(st:^OpusDecoder) ---
 
   /** Gets the size of an <code>OpusDREDDecoder</code> structure.
   * @returns The size in bytes.
@@ -616,17 +616,17 @@ foreign lib {
   /** Allocates and initializes an OpusDREDDecoder state.
     * @param [out] error <tt>int*</tt>: #OPUS_OK Success or @ref opus_errorcodes
     */
-  opus_dred_decoder_create :: proc(error:^c.int) -> OpusDREDDecoder ---
+  opus_dred_decoder_create :: proc(error:^c.int) -> ^OpusDREDDecoder ---
 
   /** Initializes an <code>OpusDREDDecoder</code> state.
     * @param[in] dec <tt>OpusDREDDecoder*</tt>: State to be initialized.
     */
-  opus_dred_decoder_init :: proc(dec:OpusDREDDecoder) -> c.int ---
+  opus_dred_decoder_init :: proc(dec:^OpusDREDDecoder) -> c.int ---
 
   /** Frees an <code>OpusDREDDecoder</code> allocated by opus_dred_decoder_create().
     * @param[in] dec <tt>OpusDREDDecoder*</tt>: State to be freed.
     */
-  opus_dred_decoder_destroy :: proc(dec:OpusDREDDecoder) ---
+  opus_dred_decoder_destroy :: proc(dec:^OpusDREDDecoder) ---
 
   /** Perform a CTL function on an Opus DRED decoder.
     *
@@ -639,7 +639,7 @@ foreign lib {
     * @see opus_genericctls
     * @see opus_decoderctls
     */
-  opus_dred_decoder_ctl :: proc(dred_dec:OpusDREDDecoder, request:c.int, #c_vararg args: ..any) -> c.int ---
+  opus_dred_decoder_ctl :: proc(dred_dec:^OpusDREDDecoder, request:c.int, #c_vararg args: ..any) -> c.int ---
 
   /** Gets the size of an <code>OpusDRED</code> structure.
     * @returns The size in bytes.
@@ -654,7 +654,7 @@ foreign lib {
   /** Frees an <code>OpusDRED</code> allocated by opus_dred_create().
     * @param[in] dec <tt>OpusDRED*</tt>: State to be freed.
     */
-  opus_dred_free :: proc(dec:OpusDRED) ---
+  opus_dred_free :: proc(dec:^OpusDRED) ---
 
   /** Decode an Opus DRED packet.
     * @param [in] dred_dec <tt>OpusDRED*</tt>: DRED Decoder state
@@ -667,8 +667,8 @@ foreign lib {
     * @param [in] defer_processing <tt>int</tt>: Flag (0 or 1). If set to one, the CPU-intensive part of the DRED decoding is deferred until opus_dred_process() is called.
     * @returns Offset (positive) of the first decoded DRED samples, zero if no DRED is present, or @ref opus_errorcodes
     */
-  opus_dred_parse :: proc(dred_dec:OpusDREDDecoder,
-    dred:OpusDRED,
+  opus_dred_parse :: proc(dred_dec:^OpusDREDDecoder,
+    dred:^OpusDRED,
     data:[^]byte,
     len:opus_int32,
     max_dred_samples:opus_int32,
@@ -683,7 +683,7 @@ foreign lib {
     * @param [out] dst <tt>OpusDRED*</tt>: Destination DRED state to store the updated state after processing.
     * @returns @ref opus_errorcodes
     */
-  opus_dred_process :: proc(dred_dec:OpusDREDDecoder, src:OpusDRED, dst:^OpusDRED) -> c.int ---
+  opus_dred_process :: proc(dred_dec:^OpusDREDDecoder, src:^OpusDRED, dst:^OpusDRED) -> c.int ---
 
   /** Decode audio from an Opus DRED packet with floating point output.
     * @param [in] st <tt>OpusDecoder*</tt>: Decoder state
@@ -695,7 +695,7 @@ foreign lib {
     *  frame_size <b>must</b> be a multiple of 2.5 ms.
     * @returns Number of decoded samples or @ref opus_errorcodes
     */
-  opus_decoder_dred_decode :: proc(st:OpusDecoder, dred:OpusDRED, dred_offset:opus_int32, pcm:[^]opus_int16, frame_size:opus_int32) -> c.int ---
+  opus_decoder_dred_decode :: proc(st:^OpusDecoder, dred:^OpusDRED, dred_offset:opus_int32, pcm:[^]opus_int16, frame_size:opus_int32) -> c.int ---
 
   /** Decode audio from an Opus DRED packet with floating point output.
     * @param [in] st <tt>OpusDecoder*</tt>: Decoder state
@@ -707,7 +707,7 @@ foreign lib {
     *  frame_size <b>must</b> be a multiple of 2.5 ms.
     * @returns Number of decoded samples or @ref opus_errorcodes
     */
-  opus_decoder_dred_decode_float :: proc(st:OpusDecoder, dred:OpusDRED, dred_offset:opus_int32, pcm:[^]c.float, frame_size:opus_int32) -> c.int ---
+  opus_decoder_dred_decode_float :: proc(st:^OpusDecoder, dred:^OpusDRED, dred_offset:opus_int32, pcm:[^]c.float, frame_size:opus_int32) -> c.int ---
 
 
   /** Parse an opus packet into one or more frames.
@@ -798,7 +798,7 @@ foreign lib {
     * @retval OPUS_BAD_ARG Insufficient data was passed to the function
     * @retval OPUS_INVALID_PACKET The compressed data passed is corrupted or of an unsupported type
     */
-  @(require_results) opus_decoder_get_nb_samples :: proc(dec:OpusDecoder, packet:[^]byte, len:opus_int32) -> c.int ---
+  @(require_results) opus_decoder_get_nb_samples :: proc(dec:^OpusDecoder, packet:[^]byte, len:opus_int32) -> c.int ---
 
   /** Applies soft-clipping to bring a float signal within the [-1,1] range. If
     * the signal is already in that range, nothing is done. If there are values
@@ -835,18 +835,18 @@ foreign lib {
     *                                       (re)initialize.
     * @returns A pointer to the same repacketizer state that was passed in.
     */
-  opus_repacketizer_init :: proc(rp:OpusRepacketizer) -> OpusRepacketizer ---
+  opus_repacketizer_init :: proc(rp:^OpusRepacketizer) -> ^OpusRepacketizer ---
 
   /** Allocates memory and initializes the new repacketizer with
   * opus_repacketizer_init().
     */
-  @(require_results) opus_repacketizer_create::proc() -> OpusRepacketizer ---
+  @(require_results) opus_repacketizer_create::proc() -> ^OpusRepacketizer ---
 
   /** Frees an <code>OpusRepacketizer</code> allocated by
     * opus_repacketizer_create().
     * @param[in] rp <tt>OpusRepacketizer*</tt>: State to be freed.
     */
-  opus_repacketizer_destroy :: proc(rp:OpusRepacketizer) ---
+  opus_repacketizer_destroy :: proc(rp:^OpusRepacketizer) ---
 
   /** Add a packet to the current repacketizer state.
     * This packet must match the configuration of any packets already submitted
@@ -895,7 +895,7 @@ foreign lib {
     *                              audio stored in the repacketizer state to more
     *                              than 120 ms.
     */
-  opus_repacketizer_cat :: proc(rp:OpusRepacketizer, data:[^]byte, len:opus_int32) -> c.int ---
+  opus_repacketizer_cat :: proc(rp:^OpusRepacketizer, data:[^]byte, len:opus_int32) -> c.int ---
 
 
   /** Construct a new packet from data previously submitted to the repacketizer
@@ -929,7 +929,7 @@ foreign lib {
     * @retval #OPUS_BUFFER_TOO_SMALL \a maxlen was insufficient to contain the
     *                                complete output packet.
     */
-  @(require_results) opus_repacketizer_out_range :: proc(rp:OpusRepacketizer, begin:c.int, end:c.int, data:[^]byte, maxlen:opus_int32) -> opus_int32 ---
+  @(require_results) opus_repacketizer_out_range :: proc(rp:^OpusRepacketizer, begin:c.int, end:c.int, data:[^]byte, maxlen:opus_int32) -> opus_int32 ---
 
   /** Return the total number of frames contained in packet data submitted to
     * the repacketizer state so far via opus_repacketizer_cat() since the last
@@ -941,7 +941,7 @@ foreign lib {
     * @returns The total number of frames contained in the packet data submitted
     *          to the repacketizer state.
     */
-  @(require_results) opus_repacketizer_get_nb_frames :: proc(rp:OpusRepacketizer) -> c.int ---
+  @(require_results) opus_repacketizer_get_nb_frames :: proc(rp:^OpusRepacketizer) -> c.int ---
 
   /** Construct a new packet from data previously submitted to the repacketizer
     * state via opus_repacketizer_cat().
@@ -972,7 +972,7 @@ foreign lib {
     * @retval #OPUS_BUFFER_TOO_SMALL \a maxlen was insufficient to contain the
     *                                complete output packet.
     */
-  @(require_results) opus_repacketizer_out :: proc(rp:OpusRepacketizer, data:[^]byte, maxlen:opus_int32) -> opus_int32 ---
+  @(require_results) opus_repacketizer_out :: proc(rp:^OpusRepacketizer, data:[^]byte, maxlen:opus_int32) -> opus_int32 ---
 
   /** Pads a given Opus packet to a larger size (possibly changing the TOC sequence).
     * @param[in,out] data <tt>const unsigned char*</tt>: The buffer containing the
@@ -1106,7 +1106,7 @@ foreign lib {
   mapping:[^]byte,
   application:c.int,
   error:^c.int,
-) -> OpusMSEncoder ---
+) -> ^OpusMSEncoder ---
 
  @(require_results) opus_multistream_surround_encoder_create :: proc(
   Fs:opus_int32,
@@ -1117,7 +1117,7 @@ foreign lib {
   mapping:[^]byte,
   application:c.int,
   error:^c.int,
-) -> OpusMSEncoder ---
+) -> ^OpusMSEncoder ---
 
 /** Initialize a previously allocated multistream encoder state.
 * The memory pointed to by \a st must be at least the size returned by
@@ -1168,7 +1168,7 @@ foreign lib {
 *          on failure.
 */
  opus_multistream_encoder_init :: proc(
-  st:OpusMSEncoder,
+  st:^OpusMSEncoder,
   Fs:opus_int32,
   channels:c.int,
   streams:c.int,
@@ -1178,7 +1178,7 @@ foreign lib {
 ) -> c.int ---
 
 opus_multistream_surround_encoder_init :: proc(
-  st:OpusMSEncoder,
+  st:^OpusMSEncoder,
   Fs:opus_int32,
   channels:c.int,
   mapping_family:c.int,
@@ -1219,7 +1219,7 @@ opus_multistream_surround_encoder_init :: proc(
 *          negative error code (see @ref opus_errorcodes) on failure.
 */
  @(require_results) opus_multistream_encode :: proc(
-st:OpusMSEncoder,
+st:^OpusMSEncoder,
 pcm:[^]c.uint16_t,
 frame_size:c.int,
 data:[^]byte,
@@ -1264,7 +1264,7 @@ max_data_bytes:opus_int32,
 *          negative error code (see @ref opus_errorcodes) on failure.
 */
  @(require_results) opus_multistream_encode_float :: proc(
-  st:OpusMSEncoder,
+  st:^OpusMSEncoder,
   pcm:[^]c.float,
   frame_size:c.int,
   data:[^]byte,
@@ -1275,7 +1275,7 @@ max_data_bytes:opus_int32,
 * opus_multistream_encoder_create().
 * @param st <tt>OpusMSEncoder*</tt>: Multistream encoder state to be freed.
 */
- opus_multistream_encoder_destroy :: proc(st:OpusMSEncoder) ---
+ opus_multistream_encoder_destroy :: proc(st:^OpusMSEncoder) ---
 
 /** Perform a CTL function on a multistream Opus encoder.
 *
@@ -1289,7 +1289,7 @@ max_data_bytes:opus_int32,
 * @see opus_encoderctls
 * @see opus_multistream_ctls
 */
-opus_multistream_encoder_ctl :: proc(st:OpusMSEncoder, request:c.int, #c_vararg args:..any) -> c.int ---
+opus_multistream_encoder_ctl :: proc(st:^OpusMSEncoder, request:c.int, #c_vararg args:..any) -> c.int ---
 
 /**@}*/
 
@@ -1349,7 +1349,7 @@ opus_multistream_encoder_ctl :: proc(st:OpusMSEncoder, request:c.int, #c_vararg 
   coupled_streams:c.int,
   mapping:[^]byte,
   error:^c.int,
-) -> OpusMSDecoder ---
+) -> ^OpusMSDecoder ---
 
 /** Intialize a previously allocated decoder state object.
 * The memory pointed to by \a st must be at least the size returned by
@@ -1386,7 +1386,7 @@ opus_multistream_encoder_ctl :: proc(st:OpusMSEncoder, request:c.int, #c_vararg 
 *          on failure.
 */
  opus_multistream_decoder_init :: proc(
-  st:OpusMSDecoder,
+  st:^OpusMSDecoder,
   Fs:opus_int32,
   channels:c.int,
   streams:c.int,
@@ -1424,7 +1424,7 @@ opus_multistream_encoder_ctl :: proc(st:OpusMSEncoder, request:c.int, #c_vararg 
 *          (see @ref opus_errorcodes) on failure.
 */
  @(require_results) opus_multistream_decode :: proc(
-  st:OpusMSDecoder,
+  st:^OpusMSDecoder,
   data:[^]byte,
   len:opus_int32,
   pcm:[^]opus_int16,
@@ -1462,7 +1462,7 @@ opus_multistream_encoder_ctl :: proc(st:OpusMSEncoder, request:c.int, #c_vararg 
 *          (see @ref opus_errorcodes) on failure.
 */
  @(require_results) opus_multistream_decode_float :: proc(
-  st:OpusMSDecoder,
+  st:^OpusMSDecoder,
   data:[^]byte,
   len:opus_int32,
   pcm:[^]c.float,
@@ -1482,13 +1482,13 @@ opus_multistream_encoder_ctl :: proc(st:OpusMSEncoder, request:c.int, #c_vararg 
 * @see opus_decoderctls
 * @see opus_multistream_ctls
 */
- opus_multistream_decoder_ctl :: proc(st:OpusMSDecoder, request:c.int, #c_vararg args:..any) -> c.int ---
+ opus_multistream_decoder_ctl :: proc(st:^OpusMSDecoder, request:c.int, #c_vararg args:..any) -> c.int ---
 
 /** Frees an <code>OpusMSDecoder</code> allocated by
 * opus_multistream_decoder_create().
 * @param st <tt>OpusMSDecoder</tt>: Multistream decoder state to be freed.
 */
- opus_multistream_decoder_destroy :: proc(st:OpusMSDecoder) ---
+ opus_multistream_decoder_destroy :: proc(st:^OpusMSDecoder) ---
 
   //opus_multistream.h end
 
@@ -1546,7 +1546,7 @@ opus_multistream_encoder_ctl :: proc(st:OpusMSEncoder, request:c.int, #c_vararg 
   mapping:[^]byte,
   application:c.int,
   error:^c.int,
-) -> OpusProjectionEncoder ---
+) -> ^OpusProjectionEncoder ---
 
 
 /** Initialize a previously allocated projection encoder state.
@@ -1592,7 +1592,7 @@ opus_multistream_encoder_ctl :: proc(st:OpusMSEncoder, request:c.int, #c_vararg 
 *          on failure.
 */
 opus_projection_ambisonics_encoder_init :: proc(
-  st:OpusProjectionEncoder,
+  st:^OpusProjectionEncoder,
   Fs:opus_int32,
   channels:c.int,
   mapping_family:c.int,
@@ -1633,7 +1633,7 @@ opus_projection_ambisonics_encoder_init :: proc(
 *          negative error code (see @ref opus_errorcodes) on failure.
 */
 @(require_results) opus_projection_encode :: proc(
-  st:OpusProjectionEncoder,
+  st:^OpusProjectionEncoder,
   pcm:[^]opus_int16,
   frame_size:c.int,
   data:[^]byte,
@@ -1679,7 +1679,7 @@ opus_projection_ambisonics_encoder_init :: proc(
 *          negative error code (see @ref opus_errorcodes) on failure.
 */
 @(require_results) opus_projection_encode_float :: proc(
-  st:OpusProjectionEncoder,
+  st:^OpusProjectionEncoder,
   pcm:[^]c.float,
   frame_size:c.int,
   data:[^]byte,
@@ -1691,7 +1691,7 @@ opus_projection_ambisonics_encoder_init :: proc(
 * opus_projection_ambisonics_encoder_create().
 * @param st <tt>OpusProjectionEncoder*</tt>: Projection encoder state to be freed.
 */
-opus_projection_encoder_destroy :: proc(st:OpusProjectionEncoder) ---
+opus_projection_encoder_destroy :: proc(st:^OpusProjectionEncoder) ---
 
 
 /** Perform a CTL function on a projection Opus encoder.
@@ -1708,7 +1708,7 @@ opus_projection_encoder_destroy :: proc(st:OpusProjectionEncoder) ---
 * @see opus_multistream_ctls
 * @see opus_projection_ctls
 */
-opus_projection_encoder_ctl :: proc(st:OpusProjectionEncoder, request:c.int , #c_vararg args:..any) -> c.int ---
+opus_projection_encoder_ctl :: proc(st:^OpusProjectionEncoder, request:c.int , #c_vararg args:..any) -> c.int ---
 
 
 /**@}*/
@@ -1778,7 +1778,7 @@ opus_projection_encoder_ctl :: proc(st:OpusProjectionEncoder, request:c.int , #c
   demixing_matrix:[^]byte,
   demixing_matrix_size:opus_int32,
   error:^c.int,
-) -> OpusProjectionDecoder ---
+) -> ^OpusProjectionDecoder ---
 
 
 /** Intialize a previously allocated projection decoder state object.
@@ -1821,7 +1821,7 @@ opus_projection_encoder_ctl :: proc(st:OpusProjectionEncoder, request:c.int , #c
 *          on failure.
 */
 opus_projection_decoder_init :: proc(
-  st:OpusProjectionDecoder,
+  st:^OpusProjectionDecoder,
   Fs:opus_int32,
   channels:c.int,
   streams:c.int,
@@ -1861,7 +1861,7 @@ opus_projection_decoder_init :: proc(
 *          (see @ref opus_errorcodes) on failure.
 */
 @(require_results) opus_projection_decode :: proc(
-  st:OpusProjectionDecoder,
+  st:^OpusProjectionDecoder,
   data:[^]byte,
   len:opus_int32,
   pcm:[^]opus_int16,
@@ -1900,7 +1900,7 @@ opus_projection_decoder_init :: proc(
 *          (see @ref opus_errorcodes) on failure.
 */
 @(require_results) opus_projection_decode_float :: proc(
-  st:OpusProjectionDecoder,
+  st:^OpusProjectionDecoder,
   data:[^]byte,
   len:opus_int32,
   pcm:[^]c.float,
@@ -1923,14 +1923,14 @@ opus_projection_decoder_init :: proc(
 * @see opus_multistream_ctls
 * @see opus_projection_ctls
 */
-opus_projection_decoder_ctl :: proc(st:OpusProjectionDecoder, request:c.int, #c_vararg args:..any) -> c.int ---
+opus_projection_decoder_ctl :: proc(st:^OpusProjectionDecoder, request:c.int, #c_vararg args:..any) -> c.int ---
 
 
 /** Frees an <code>OpusProjectionDecoder</code> allocated by
 * opus_projection_decoder_create().
 * @param st <tt>OpusProjectionDecoder</tt>: Projection decoder state to be freed.
 */
-opus_projection_decoder_destroy :: proc(st:OpusProjectionDecoder) ---
+opus_projection_decoder_destroy :: proc(st:^OpusProjectionDecoder) ---
 
 //opus_projection.h end
 }

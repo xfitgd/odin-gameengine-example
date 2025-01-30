@@ -41,7 +41,7 @@ TextureUsage :: enum {
     __TRANSIENT_ATTACHMENT,
 }
 TextureUsages :: bit_set[TextureUsage]
-ResourceUsage :: enum {GPU,CPU}
+
 
 TextureCreateOption :: struct {
     len:u32,

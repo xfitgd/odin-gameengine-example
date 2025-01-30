@@ -147,7 +147,7 @@ Generic_Finalizer      :: #type proc "c" (object: rawptr)
 Face_Attach_Func       :: #type proc "c" (face: Face, stream: Stream) -> Error
 Face_Init_Func         :: #type proc "c" (stream: Stream, face: Face, typeface_index, num_params: c.int, parameters: ^Parameter) -> Error
 Face_Done_Func         :: #type proc "c" (face: Face)
-Face_Get_Advances_Func :: #type proc "c" (face: Face, first, count: c.uint, flags: i32, advances: ^Fixed) -> Error
+Face_Get_Advances_Func :: #type proc "c" (face: Face, first, count: c.uint, flags: c.int, advances: ^Fixed) -> Error
 Face_Get_Kerning_Func  :: #type proc "c" (face: Face, left_glyph, right_glyph: c.uint, kerning: ^Vector) -> Error
 
 Module_Constructor     :: #type proc "c" (module: Module) -> Error
@@ -161,7 +161,7 @@ Size_Select_Func       :: #type proc "c" (size: Size, size_index: c.ulong) -> Er
 
 Slot_Init_Func         :: #type proc "c" (slot: Glyph_Slot) -> Error
 Slot_Done_Func         :: #type proc "c" (slot: Glyph_Slot)
-Slot_Load_Func         :: #type proc "c" (slot: Glyph_Slot, size: Size, glyph_index: c.uint, load_flags: i32) -> Error
+Slot_Load_Func         :: #type proc "c" (slot: Glyph_Slot, size: Size, glyph_index: c.uint, load_flags: c.int) -> Error
 
 Stream_IO_Func         :: #type proc "c" (stream: Stream, offset: c.ulong, buffer: ^c.uchar, count: c.ulong) -> c.ulong
 Stream_Close_Func      :: #type proc "c" (stream: Stream)
@@ -393,7 +393,7 @@ List_Rec :: struct {
     head, tail: List_Node,
 }
 
-Load_Flag :: enum i32 {
+Load_Flag :: enum c.int {
     No_Scale                    = 0,
     No_Hinting                  = 1,
     Render                      = 2,
@@ -416,7 +416,7 @@ Load_Flag :: enum i32 {
 
 }
 
-Load_Flags :: distinct bit_set[Load_Flag; i32]
+Load_Flags :: distinct bit_set[Load_Flag; c.int]
 
 Matrix :: struct {
     xx, xy, yx, yy : Fixed,
@@ -545,6 +545,95 @@ Vector :: struct {
     x, y : Pos,
 }
 
+Span :: struct {
+    x: i16,
+    len: u16,
+    coverage: u8,
+}
+
+SpanFunc :: #type proc "c" (
+    y: c.int, 
+    count: c.int, 
+    spans: ^Span, 
+    user: rawptr
+)
+
+Raster_BitTest_Func :: #type proc "c" (
+    x: c.int, 
+    y: c.int, 
+    user: rawptr
+) -> c.int
+
+Raster_BitSet_Func :: #type proc "c" (
+    x: c.int, 
+    y: c.int, 
+    user: rawptr
+)
+
+Raster_Params :: struct {
+    target: ^Bitmap,
+    source: rawptr,
+    flags: c.int,
+    gray_spans: SpanFunc,
+    black_spans: SpanFunc,
+    bit_test: Raster_BitTest_Func,
+    bit_set_: Raster_BitSet_Func,
+    user: rawptr,
+    clip_box: BBox,
+}
+
+Raster :: distinct rawptr
+
+Raster_NewFunc :: #type proc "c" (
+    memory: rawptr, 
+    raster: ^Raster
+) -> c.int
+
+Raster_DoneFunc :: #type proc "c" (
+    raster: Raster
+)
+
+Raster_ResetFunc :: #type proc "c" (
+    raster: Raster, 
+    pool: [^]u8, 
+    pool_size: u32
+)
+
+Raster_SetModeFunc :: #type proc "c" (
+    raster: Raster, 
+    mode: u32, 
+    args: rawptr
+) -> c.int
+
+Raster_RenderFunc :: #type proc "c" (
+    raster: Raster, 
+    params: ^Raster_Params
+) -> c.int
+
+Raster_Funcs :: struct {
+    glyph_format: Glyph_Format,
+    raster_new: Raster_NewFunc,
+    raster_reset: Raster_ResetFunc,
+    raster_set_mode: Raster_SetModeFunc,
+    raster_render: Raster_RenderFunc,
+    raster_done: Raster_DoneFunc,
+}
+Outline_Funcs :: struct {
+    move_to: proc "c" (to: ^Vector, user: rawptr) -> c.int,
+    line_to: proc "c" (to: ^Vector, user: rawptr) -> c.int,
+    conic_to: proc "c" (control: ^Vector, to: ^Vector, user: rawptr) -> c.int,
+    cubic_to: proc "c" (control1, control2, to: ^Vector, user: rawptr) -> c.int,
+    shift: c.int,
+    delta:Pos
+}
+
+BBox :: struct {
+    xMin: Pos,
+    yMin: Pos,
+    xMax: Pos,
+    yMax: Pos,
+}
+
 @(default_calling_convention="c")
 foreign freetype {
     @(link_name="FT_Init_FreeType") init_free_type :: proc(library: ^Library) -> Error ---
@@ -557,14 +646,113 @@ foreign freetype {
     @(link_name="FT_Load_Char")      load_char      :: proc(face: Face, char_code: c.ulong, load_flags: Load_Flags) -> Error ---
     @(link_name="FT_Set_Char_Size")  set_char_size  :: proc(face: Face, char_width, char_height: F26Dot6, horz_resolution, vert_resolution: c.uint) -> Error ---
     @(link_name="FT_Get_Char_Index") get_char_index :: proc(face: Face, code: c.ulong) -> c.uint ---
+
+    @(link_name="FT_Get_First_Char") get_first_char :: proc(face: Face, agindex:^c.uint) -> c.ulong ---
+    @(link_name="FT_Get_Next_Char") get_next_char :: proc(face: Face, code: c.ulong, agindex:^c.uint) -> c.ulong ---
     
     @(link_name="FT_Load_Glyph")   load_glyph   :: proc(face: Face, index: c.uint, flags: Load_Flags) -> Error ---
     @(link_name="FT_Render_Glyph") render_glyph :: proc(slot: Glyph_Slot, render_mode: Render_Mode) -> Error ---
 
     @(link_name="FT_Set_Pixel_Sizes") set_pixel_sizes :: proc(face: Face, pixel_width, pixel_height: u32) -> Error ---
     @(link_name="FT_Request_Size")    request_size    :: proc(face: Face, req: Size_Request) -> Error ---
-    @(link_name="FT_Select_Size")     select_size     :: proc(face: Face, strike_index: i32) -> Error ---
+    @(link_name="FT_Select_Size")     select_size     :: proc(face: Face, strike_index: c.int) -> Error ---
 
-    @(link_name="FT_Set_Transform") set_transform   :: proc(face: Face, _matrix: ^Matrix, delta: ^Vector) ---
-    @(link_name="FT_Get_Transform") get_transform   :: proc(face: Face, _matrix: ^Matrix, delta: ^Vector) ---
+    @(link_name="FT_Set_Transform") set_transform :: proc(face: Face, _matrix: ^Matrix, delta: ^Vector) ---
+    @(link_name="FT_Get_Transform") get_transform :: proc(face: Face, _matrix: ^Matrix, delta: ^Vector) ---
+
+    @(link_name="FT_Outline_New")
+    outline_new :: proc(
+        library: Library, 
+        numPoints: c.uint, 
+        numContours: c.int, 
+        anoutline: ^Outline
+    ) -> Error ---
+
+    @(link_name="FT_Outline_Done")
+    outline_done :: proc(
+        library: Library, 
+        outline: ^Outline
+    ) -> Error ---
+
+    @(link_name="FT_Outline_Check")
+    outline_check :: proc(
+        _outline: ^Outline
+    ) -> Error ---
+
+    @(link_name="FT_Outline_Get_CBox")
+    outline_get_cbox :: proc(
+        _outline: ^Outline, 
+        _acbox: ^BBox
+    ) ---
+
+    @(link_name="FT_Outline_Translate")
+    outline_translate :: proc(
+        _outline: ^Outline, 
+        _xOffset: Pos, 
+        _yOffset: Pos
+    ) ---
+
+    @(link_name="FT_Outline_Copy")
+    outline_copy :: proc(
+        _source: ^Outline, 
+        _target: ^Outline
+    ) -> Error ---
+
+    @(link_name="FT_Outline_Transform")
+    outline_transform :: proc(
+        _outline: ^Outline, 
+        _matrix: ^Matrix,
+    ) ---
+
+    @(link_name="FT_Outline_Embolden")
+    outline_embolden :: proc(
+        outline: ^Outline, 
+        strength: Pos
+    ) -> Error ---
+
+    @(link_name="FT_Outline_EmboldenXY")
+    outline_embolden_xy :: proc(
+        outline: ^Outline, 
+        xstrength: Pos, 
+        ystrength: Pos
+    ) -> Error ---
+
+    @(link_name="FT_Outline_Reverse")
+    outline_reverse :: proc(
+        outline: ^Outline
+    ) ---
+
+    @(link_name="FT_Outline_Get_Bitmap")
+    outline_get_bitmap :: proc(
+        library: Library, 
+        outline: ^Outline, 
+        abitmap: ^Bitmap
+    ) -> Error ---
+
+    @(link_name="FT_Outline_Render")
+    outline_render :: proc(
+        library: Library, 
+        outline: ^Outline, 
+        params: ^Raster_Params
+    ) -> Error ---
+
+    @(link_name="FT_Outline_Get_Orientation")
+    outline_get_orientation :: proc(
+        outline: ^Outline
+    ) -> Orientation ---
+
+    @(link_name="FT_Outline_Decompose")
+    outline_decompose :: proc(
+        outline: ^Outline, 
+        funcs: ^Outline_Funcs, 
+        user_data: rawptr
+    ) -> Error ---
+}
+
+Orientation :: enum c.uint {
+    TRUETYPE = 0,
+    POSTSCRIPT = 1,
+    FILL_RIGHT = 0,
+    FILL_LEFT = 1,
+    NONE = 2,
 }

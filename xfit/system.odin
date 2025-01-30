@@ -14,7 +14,8 @@ import "core:thread"
 import "core:sync"
 import "core:strings"
 import "base:runtime"
-import "xpanic"
+import "xfmt"
+import "xmem"
 
 @(private) render_th: ^thread.Thread
 
@@ -25,9 +26,14 @@ import "xpanic"
 @(private) deltaTime : u64
 @(private) processorCoreLen : uint
 
-printTrace :: xpanic.printTrace
-printTraceBuf :: xpanic.printTraceBuf
-panicLog :: xpanic.panicLog
+printTrace :: xfmt.printTrace
+printTraceBuf :: xfmt.printTraceBuf
+panicLog :: xfmt.panicLog
+
+printLog :: xfmt.printLog
+printlnLog :: xfmt.printlnLog
+printfLog :: xfmt.printfLog
+printflnLog :: xfmt.printflnLog
 
 Exiting :: #force_inline proc  "contextless"() -> bool {return exiting}
 dt :: #force_inline proc "contextless" () -> f64 { return f64(deltaTime) / 1000000000.0 }
@@ -140,7 +146,7 @@ xfitMain :: proc(
 }
 
 systemInit :: proc() {
-	xpanic.Start()
+	xfmt.Start()
 	monitors = make_non_zeroed([dynamic]MonitorInfo)
 	when is_android {
 		//TODO
@@ -166,7 +172,7 @@ systemDestroy :: proc() {
 	}
 }
 systemAfterDestroy :: proc() {
-	xpanic.Destroy()
+	xfmt.Destroy()
 	delete(monitors)
 }
 
@@ -296,50 +302,15 @@ make_non_zeroed :: proc {
 	// make_non_zeroed_soa_dynamic_array_len_cap,
 }
 
-@(require_results)
-make_non_zeroed_slice :: proc($T: typeid/[]$E, #any_int len: int, allocator := context.allocator, loc := #caller_location) -> (T, runtime.Allocator_Error) #optional_allocator_error {
-	runtime.make_slice_error_loc(loc, len)
-	data, err := runtime.mem_alloc_non_zeroed(size_of(E)*len, align_of(E), allocator, loc)
-	if data == nil && size_of(E) != 0 {
-		return nil, err
-	}
-	s := runtime.Raw_Slice{raw_data(data), len}
-	return transmute(T)s, err
-}
+make_non_zeroed_slice :: xmem.make_non_zeroed_slice
+make_non_zeroed_dynamic_array :: xmem.make_non_zeroed_dynamic_array
+make_non_zeroed_dynamic_array_len :: xmem.make_non_zeroed_dynamic_array_len
+make_non_zeroed_dynamic_array_len_cap :: xmem.make_non_zeroed_dynamic_array_len_cap
+make_non_zeroed_multi_pointer :: xmem.make_non_zeroed_multi_pointer
 
-@(require_results)
-make_non_zeroed_dynamic_array :: proc($T: typeid/[dynamic]$E, allocator := context.allocator, loc := #caller_location) -> (T, runtime.Allocator_Error) #optional_allocator_error {
-	return make_dynamic_array_len_cap(T, 0, 0, allocator, loc)
-}
+new_non_zeroed :: xmem.new_non_zeroed
+new_non_zeroed_aligned :: xmem.new_non_zeroed_aligned
+new_non_zeroed_clone :: xmem.new_non_zeroed_clone
 
-@(require_results)
-make_non_zeroed_dynamic_array_len :: proc($T: typeid/[dynamic]$E,  #any_int len: int, allocator := context.allocator, loc := #caller_location) -> (T, runtime.Allocator_Error) #optional_allocator_error {
-	return make_dynamic_array_len_cap(T, len, len, allocator, loc)
-}
-
-@(require_results)
-make_non_zeroed_dynamic_array_len_cap :: proc($T: typeid/[dynamic]$E, #any_int len: int, #any_int cap: int, allocator := context.allocator, loc := #caller_location) -> (array: T, err: runtime.Allocator_Error) #optional_allocator_error {
-	runtime.make_dynamic_array_error_loc(loc, 0, 0)
-
-	raw_array := (^runtime.Raw_Dynamic_Array)(&array)
-
-	raw_array.allocator = allocator // initialize allocator before just in case it fails to allocate any memory
-	data := runtime.mem_alloc_non_zeroed(size_of(E) * cap, align_of(E), allocator, loc) or_return
-	use_zero := data == nil /*&& size_of(E) != 0*/
-	raw_array.data = raw_data(data)
-	raw_array.len = 0 if use_zero else len
-	raw_array.cap = 0 if use_zero else cap
-	raw_array.allocator = allocator
-	return
-}
-
-@(require_results)
-make_non_zeroed_multi_pointer :: proc($T: typeid/[^]$E, #any_int len: int, allocator := context.allocator, loc := #caller_location) -> (mp: T, err: runtime.Allocator_Error) #optional_allocator_error {
-	runtime.make_slice_error_loc(loc, len)
-	data := runtime.mem_alloc_non_zeroed(size_of(E)*len, align_of(E), allocator, loc) or_return
-	if data == nil && size_of(E) != 0 {
-		return
-	}
-	mp = cast(T)raw_data(data)
-	return
-}
+resize_non_zeroed_slice :: xmem.resize_non_zeroed_slice
+resize_slice :: xmem.resize_slice
