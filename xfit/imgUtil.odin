@@ -18,13 +18,13 @@ TextureFmt :: enum {
 
 @(require_results) TextureFmt_IsDepth :: proc  "contextless" (t:TextureFmt) -> bool {
 	#partial switch(t) {
-		case .D24UnormS8Uint, .D32SfloatS8Uint, .D16UnormS8Uint:
+		case .D24UnormS8Uint, .D32SfloatS8Uint, .D16UnormS8Uint, .DefaultDepth:
 		return true
 	}
 	return false
 }
 
-@(require_results) TextureFmt_BitSize :: proc  "contextless" (fmt:TextureFmt) -> uint {
+@(require_results) TextureFmt_BitSize :: proc  "contextless" (fmt:TextureFmt) -> int {
     switch (fmt) {
         case .DefaultColor : return TextureFmt_BitSize(vkFmtToTextureFmt(vkFmt.format))
         case .DefaultDepth : return TextureFmt_BitSize(__depthFmt)

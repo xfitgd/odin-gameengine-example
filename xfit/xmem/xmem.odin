@@ -2,7 +2,9 @@ package xmem
 
 import "base:intrinsics"
 import "core:mem"
+import "core:slice"
 import "base:runtime"
+import "../xfmt"
 
 make_non_zeroed :: proc {
 	make_non_zeroed_slice,
@@ -95,7 +97,8 @@ new_non_zeroed_clone :: proc(data: $T, allocator := context.allocator, loc := #c
 resize_non_zeroed_slice :: proc(oldData: $T/[]$E, #any_int newLen: int, allocator := context.allocator, loc := #caller_location) -> (T, runtime.Allocator_Error) #optional_allocator_error {
 	make_resize_slice_error_loc(loc, len(oldData), newLen)
 	if len(oldData) == newLen do return oldData, .None
-	data, err := runtime.non_zero_mem_resize(raw_data(oldData), len(oldData), newLen)
+
+	data, err := runtime.non_zero_mem_resize(raw_data(oldData), len(oldData) * size_of(E), newLen * size_of(E), align_of(E), allocator)
 	if err != .None {
 		return nil, err
 	}
@@ -108,7 +111,7 @@ resize_non_zeroed_slice :: proc(oldData: $T/[]$E, #any_int newLen: int, allocato
 resize_slice :: proc(oldData: $T/[]$E, #any_int newLen: int, allocator := context.allocator, loc := #caller_location) -> (T, runtime.Allocator_Error) #optional_allocator_error {
 	make_resize_slice_error_loc(loc, len(oldData), newLen)
 	if len(oldData) == newLen do return oldData, .None
-	data, err := runtime.mem_resize(raw_data(oldData), len(oldData), newLen)
+	data, err := runtime.mem_resize(raw_data(oldData), len(oldData) * size_of(E), newLen * size_of(E), align_of(E),  allocator)
 	if err != .None {
 		return nil, err
 	}
@@ -123,7 +126,7 @@ make_resize_slice_error_loc :: #force_inline proc "contextless" (loc := #caller_
 		return
 	}
 	@(cold, no_instrumentation)
-	handle_error :: proc "contextless" (loc: runtime.Source_Code_Location, newLen: int) -> ! {
+	handle_error :: proc "contextless" (loc: runtime.Source_Code_Location, oldLen, newLen: int) -> ! {
 		runtime.print_caller_location(loc)
 		runtime.print_string(" Invalid slice length for make: ")
 		runtime.print_i64(i64(oldLen))
@@ -132,5 +135,26 @@ make_resize_slice_error_loc :: #force_inline proc "contextless" (loc := #caller_
 		runtime.print_byte('\n')
 		runtime.bounds_trap()
 	}
-	handle_error(loc, newLen)
+	handle_error(loc, oldLen, newLen)
+}
+
+when ODIN_DEBUG {
+	ICheckInit :: struct {
+		init: bool,
+	}
+	ICheckInit_Init :: proc "contextless" (t: ^ICheckInit) {
+		t.init = true
+	}
+	ICheckInit_Check :: proc "contextless" (t: ^ICheckInit) {
+		if !t.init do xfmt.panicLog("ICheckInit_Check: uninitialized")
+	}
+	ICheckInit_Deinit :: proc "contextless" (t: ^ICheckInit) {
+		if !t.init do xfmt.panicLog("ICheckInit_Check: uninitialized")
+		t.init = false
+	}
+} else {
+	ICheckInit :: struct {}
+	ICheckInit_Init :: proc "contextless" (t: ^ICheckInit) {}
+	ICheckInit_Check :: proc "contextless" (t: ^ICheckInit) {}
+	ICheckInit_Deinit :: proc "contextless" (t: ^ICheckInit) {}
 }

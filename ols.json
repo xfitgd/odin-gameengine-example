@@ -1,9 +1,5 @@
 {
     "collections": [
-		{ "name": "core", "path": "/usr/local/odin/core" },
-		{ "name": "base", "path": "/usr/local/odin/base" },
-		{ "name": "vendor", "path": "/usr/local/odin/vendor" },
-		{ "name": "shared", "path": "/usr/local/odin/shared" }
 	],
     "$schema": "https://raw.githubusercontent.com/DanielGavin/ols/master/misc/ols.schema.json",
     "enable_document_symbols": true,

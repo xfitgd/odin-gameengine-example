@@ -17,7 +17,7 @@ import "base:runtime"
 import "xfmt"
 import "xmem"
 
-@(private) render_th: ^thread.Thread
+//@(private) render_th: ^thread.Thread
 
 @(private) exiting := false
 @(private) programStart := true
@@ -25,6 +25,7 @@ import "xmem"
 @(private) maxFrame : f64
 @(private) deltaTime : u64
 @(private) processorCoreLen : uint
+@(private) gClearColor : [4]f32 = {0.0, 0.0, 0.0, 1.0}
 
 printTrace :: xfmt.printTrace
 printTraceBuf :: xfmt.printTraceBuf
@@ -43,6 +44,7 @@ GetProcessorCoreLen :: #force_inline proc "contextless" () -> uint { return proc
 Init: proc()
 Update: proc()
 Destroy: proc()
+Size: proc() = proc () {}
 Activate: proc "contextless" () = proc "contextless" () {}
 Close: proc "contextless" () -> bool = proc "contextless" () -> bool{ return true }
 
@@ -124,6 +126,7 @@ is_log :: #config(__log__, true)
 
 xfitInit :: proc() {
 	systemInit()
+	systemStart()
 	inited = true
 }
 
@@ -142,10 +145,37 @@ xfitMain :: proc(
 	__windowWidth = _windowWidth
 	__windowHeight = _windowHeight
 
-	systemStart()
+	windowStart()
+
+	vkStart()
+
+	Init()
+
+	for !exiting {
+		systemLoop()
+	}
+
+	vkWaitDeviceIdle()
+
+	Destroy()
+
+	vkDestory()
+
+	systemDestroy()
+
+	systemAfterDestroy()
+
 }
 
-systemInit :: proc() {
+@(private) systemLoop :: proc() {
+	when is_android {
+		//TODO
+	} else {
+		glfwLoop()
+	}
+}
+
+@(private) systemInit :: proc() {
 	xfmt.Start()
 	monitors = make_non_zeroed([dynamic]MonitorInfo)
 	when is_android {
@@ -155,7 +185,7 @@ systemInit :: proc() {
 	}
 }
 
-systemStart :: proc() {
+@(private) systemStart :: proc() {
 	when is_android {
 		//TODO
 	} else {
@@ -163,7 +193,15 @@ systemStart :: proc() {
 	}
 }
 
-systemDestroy :: proc() {
+@(private) windowStart :: proc() {
+	when is_android {
+		//TODO
+	} else {
+		glfwStart()
+	}
+}
+
+@(private) systemDestroy :: proc() {
 	when is_android {
 		//TODO
 	} else {
@@ -171,7 +209,7 @@ systemDestroy :: proc() {
 		glfwSystemDestroy()
 	}
 }
-systemAfterDestroy :: proc() {
+@(private) systemAfterDestroy :: proc() {
 	xfmt.Destroy()
 	delete(monitors)
 }
@@ -213,25 +251,25 @@ when is_android {
 	print :: fmt.print
 }
 
-@(private) CreateRenderFuncThread :: proc() {
-	render_th = thread.create(RenderFunc)
-}
+// @(private) CreateRenderFuncThread :: proc() {
+// 	render_th = thread.create_and_start(RenderFunc)
+// }
 
-@(private) RenderFunc :: proc(_: ^thread.Thread) {
-	vkStart()
+// @(private) RenderFunc :: proc() {
+// 	vkStart()
 
-	Init()
+// 	Init()
 
-	for !exiting {
-		RenderLoop()
-	}
+// 	for !exiting {
+// 		RenderLoop()
+// 	}
 
-	vkWaitDeviceIdle()
+// 	vkWaitDeviceIdle()
 
-	Destroy()
+// 	Destroy()
 
-	vkDestory()
-}
+// 	vkDestory()
+// }
 
 @(private) RenderLoop :: proc() {
 	@static start:time.Time
@@ -265,6 +303,8 @@ when is_android {
 
 	if !Paused_ {
 		vkDrawFrame()
+		//vkWaitGraphicsIdle()
+		//vkOpExecuteDestroy()
 	}
 }
 
@@ -314,3 +354,8 @@ new_non_zeroed_clone :: xmem.new_non_zeroed_clone
 
 resize_non_zeroed_slice :: xmem.resize_non_zeroed_slice
 resize_slice :: xmem.resize_slice
+
+ICheckInit :: xmem.ICheckInit
+ICheckInit_Init :: xmem.ICheckInit_Init
+ICheckInit_Check :: xmem.ICheckInit_Check
+ICheckInit_Deinit :: xmem.ICheckInit_Deinit

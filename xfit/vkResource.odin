@@ -27,7 +27,7 @@ VkDescriptorSet :: struct {
     __set: vk.DescriptorSet,
     size: []VkDescriptorPoolSize,
     bindings: []u32,
-    __resources: [VK_MAX_RESOURCES_FROM_DESCRIPTOR_SET]^VkBaseResource,
+    __resources: [VK_MAX_RESOURCES_FROM_DESCRIPTOR_SET]VkUnionResource,
 };
 
 TextureType :: enum {
@@ -73,8 +73,8 @@ BufferCreateOption :: struct {
 
 
 VkUnionResource :: union #no_nil {
-    VkBufferResource,
-    VkTextureResource
+    ^VkBufferResource,
+    ^VkTextureResource
 }
 VkBaseResource :: struct {
     idx:VkResourceRange,

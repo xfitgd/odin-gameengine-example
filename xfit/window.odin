@@ -121,3 +121,16 @@ GetMonitorFromWindow :: proc "contextless" () -> ^MonitorInfo #no_bounds_check {
 	}
 	return primaryMonitor
 }
+
+WindowWidth :: proc "contextless" () -> u32 {
+	return __windowWidth.?
+}
+WindowHeight :: proc "contextless" () -> u32 {
+	return __windowHeight.?
+}
+WindowX :: proc "contextless" () -> i32 {
+	return __windowX.?
+}
+WindowY :: proc "contextless" () -> i32 {
+	return __windowY.?
+}

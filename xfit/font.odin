@@ -47,7 +47,6 @@ FontRenderOpt :: struct {
     area:Maybe(PointF),
     color:Point3DwF,
     flag:ResourceUsage,
-    colorFlag:ResourceUsage,
 }
 
 FontRenderOpt2 :: struct {
@@ -63,16 +62,18 @@ FontRenderRange :: struct {
 }
 
 //convert font format to VFF(vector font file)
-Font_ConvertFontFmtToVFF :: proc(_fontFmtData:[]byte, _fontFmtFaceIdx:uint) -> ([]byte, freetype.Error) {
+Font_ConvertFontFmtToVFF :: proc(_fontFmtData:[]byte, _fontFmtFaceIdx:uint) -> ([]byte, freetype.Error, ShapesError) {
     FTMoveTo :: proc "c" (to: ^freetype.Vector, user: rawptr) -> c.int {
         data : ^FontUserData = auto_cast user
         data.pen = PointF{f32(to.x) / (64 * data.scale), f32(to.y) / (64 * data.scale)}
-    
-        //다각형 하나를 그리고 펜위치를 이동하므로 nPolyLen 다각형 갯수를 증가시키고 nPoly를 0으로 만든다.
-        if data.nPoly > 0 {
-            data.polygon.nodes[0].nPolygons[data.nPolyLen] = data.nPoly
-            data.nPolyLen += 1
-            data.nPoly = 0
+
+        if data.idx > 0 {
+            data.polygon.nPolys[data.nPoly] = data.nPolyLen
+            data.nPoly += 1
+            data.polygon.nTypes[data.nTypes] = data.nTypesLen
+            data.nTypes += 1
+            data.nPolyLen = 0
+            data.nTypesLen = 0
         }
         return 0
     }
@@ -80,10 +81,13 @@ Font_ConvertFontFmtToVFF :: proc(_fontFmtData:[]byte, _fontFmtFaceIdx:uint) -> (
         data : ^FontUserData = auto_cast user
         end := PointF{f32(to.x) / (64 * data.scale), f32(to.y) / (64 * data.scale)}
     
-        data.polygon.nodes[0].lines[data.idx2] = Line_LineInit(data.pen)
+        data.polygon.poly[data.idx] = data.pen
+        data.polygon.types[data.typeIdx] = .Line
         data.pen = end
-        data.idx2 += 1
-        data.nPoly += 1  
+        data.idx += 1
+        data.nPolyLen += 1
+        data.typeIdx += 1
+        data.nTypesLen += 1
         return 0
     }
     FTConicTo :: proc "c" (control: ^freetype.Vector, to: ^freetype.Vector, user: rawptr) -> c.int {
@@ -91,10 +95,14 @@ Font_ConvertFontFmtToVFF :: proc(_fontFmtData:[]byte, _fontFmtFaceIdx:uint) -> (
         ctl := PointF{f32(control.x) / (64 * data.scale), f32(control.y) / (64 * data.scale)}
         end := PointF{f32(to.x) / (64 * data.scale), f32(to.y) / (64 * data.scale)}
     
-        data.polygon.nodes[0].lines[data.idx2] = Line_QuadraticInit(data.pen, ctl)
+        data.polygon.poly[data.idx] = data.pen
+        data.polygon.poly[data.idx+1] = ctl
+        data.polygon.types[data.typeIdx] = .Quadratic
         data.pen = end
-        data.idx2 += 1
-        data.nPoly += 1
+        data.idx += 2
+        data.nPolyLen += 2
+        data.typeIdx += 1
+        data.nTypesLen += 1
         return 0
     }
     FTCubicTo :: proc "c" (control0, control1, to: ^freetype.Vector, user: rawptr) -> c.int {
@@ -103,22 +111,26 @@ Font_ConvertFontFmtToVFF :: proc(_fontFmtData:[]byte, _fontFmtFaceIdx:uint) -> (
         ctl1 := PointF{f32(control1.x) / (64 * data.scale), f32(control1.y) / (64 * data.scale)}
         end := PointF{f32(to.x) / (64 * data.scale), f32(to.y) / (64 * data.scale)}
     
-        data.polygon.nodes[0].lines[data.idx2] = {
-            start = data.pen,
-            control0 = ctl0,
-            control1 = ctl1,
-        }
+        data.polygon.poly[data.idx] = data.pen
+        data.polygon.poly[data.idx+1] = ctl0
+        data.polygon.poly[data.idx+2] = ctl1
+        data.polygon.types[data.typeIdx] = .Unkown
         data.pen = end
-        data.idx2 += 1
-        data.nPoly += 1
+        data.idx += 3
+        data.nPolyLen += 3
+        data.typeIdx += 1
+        data.nTypesLen += 1
         return 0
     }
     FontUserData :: struct {
         pen : PointF,
         polygon : ^Shapes,
-        idx2 : u32,
-        nPolyLen : u32,
+        idx : u32,
         nPoly : u32,
+        nPolyLen : u32,
+        nTypes : u32,
+        nTypesLen : u32,
+        typeIdx : u32,
         scale : f32,
     }
 
@@ -141,24 +153,24 @@ Font_ConvertFontFmtToVFF :: proc(_fontFmtData:[]byte, _fontFmtFaceIdx:uint) -> (
     }
 
     err = freetype.new_memory_face(library, raw_data(_fontFmtData), auto_cast len(_fontFmtData), auto_cast _fontFmtFaceIdx, &face)
-    if err != .Ok do return nil, err
+    if err != .Ok do return nil, err, .None
     defer freetype.done_face(face)
 
     err = freetype.set_char_size(face, 0, 16 * 256 * 64, 0, 0)
-    if err != .Ok do return nil, err
+    if err != .Ok do return nil, err, .None
 
-    outData := make_non_zeroed_dynamic_array([dynamic]byte)
+    outData := make_non_zeroed_dynamic_array([dynamic]byte, vkDefAllocator)
     defer if err != .Ok {
         delete(outData)
     }
 
-    append(&outData, 'v')
-    append(&outData, 'f')
-    append(&outData, 'f')
-    append(&outData, 0)
+    non_zero_append(&outData, 'v')
+    non_zero_append(&outData, 'f')
+    non_zero_append(&outData, 'f')
+    non_zero_append(&outData, 0)
 
     non_zero_resize_dynamic_array(&outData, 4 + size_of(u32) + size_of(f32))
-    //(transmute([^]u32)(&outData[4]))[0] = 0 갯수 알아내면 나중에 대입한다.
+    //(transmute([^]u32)(&outData[4]))[0] = 0 ?갯수 알아내면 나중에 대입한다.
     (transmute([^]f32)(&outData[4 + size_of(f32)]))[0] = f32(face.size.metrics.height) / (64.0 * SCALE_DEFAULT)
 
     outDataIdx := len(outData)
@@ -175,30 +187,34 @@ Font_ConvertFontFmtToVFF :: proc(_fontFmtData:[]byte, _fontFmtFaceIdx:uint) -> (
         }
     
         poly : Shapes = {
-            nodes = make_non_zeroed([]ShapesNode, 1, context.temp_allocator)
+            nPolys = make_non_zeroed([]u32, face.glyph.outline.n_points, context.temp_allocator),
+            nTypes = make_non_zeroed([]u32, face.glyph.outline.n_points, context.temp_allocator),
+            types = make_non_zeroed([]CurveType, face.glyph.outline.n_points, context.temp_allocator),
+            poly = make_non_zeroed([]PointF, face.glyph.outline.n_points, context.temp_allocator),
         }
         defer {
-            for v in poly.nodes {
-                delete(v.lines, context.temp_allocator)
-                delete(v.nPolygons, context.temp_allocator)
-            }
-            delete(poly.nodes)
+            delete(poly.nPolys, context.temp_allocator)
+            delete(poly.nTypes, context.temp_allocator)
+            delete(poly.types, context.temp_allocator)
+            delete(poly.poly, context.temp_allocator)
+            delete(poly.colors, context.temp_allocator)
         }
-        poly.nodes[0].lines = make_non_zeroed([]Line, face.glyph.outline.n_points, context.temp_allocator) 
-        poly.nodes[0].nPolygons = make_non_zeroed([]u32, face.glyph.outline.n_points, context.temp_allocator) 
-    
+        poly.nPolys[0] = 0
         data : FontUserData = {
             polygon = &poly,
-            idx2 = 0,
+            idx = 0,
+            typeIdx = 0,
             nPoly = 0,
             nPolyLen = 0,
+            nTypes = 0,
+            nTypesLen = 0,
             scale = SCALE_DEFAULT,
         }
     
         err = freetype.outline_decompose(&face.glyph.outline, &funcs, &data)
         if err != .Ok do panicLog(err)
 
-        if data.idx2 == 0 {
+        if data.idx == 0 {
             non_zero_resize_dynamic_array(&outData, len(outData) + size_of(CharNode))
             (transmute([^]CharNode)(&outData[len(outData) - size_of(CharNode)]))[0] = CharNode{
                 size = 0,
@@ -207,25 +223,30 @@ Font_ConvertFontFmtToVFF :: proc(_fontFmtData:[]byte, _fontFmtFaceIdx:uint) -> (
             }
             continue;
         } else {
-            if data.nPoly > 0 {
-                data.polygon.nodes[0].nPolygons[data.nPolyLen] = data.nPoly
-                data.nPolyLen += 1
+            poly.nPolys[data.nPoly] = data.nPolyLen
+            data.nPoly += 1
+            poly.nTypes[data.nTypes] = data.nTypesLen
+            data.nTypes += 1
+            poly.poly = resize_non_zeroed_slice(poly.poly, data.idx, context.temp_allocator)
+            poly.nPolys = resize_non_zeroed_slice(poly.nPolys, data.nPoly, context.temp_allocator)
+            poly.nTypes = resize_non_zeroed_slice(poly.nTypes, data.nTypes, context.temp_allocator)
+            poly.types = resize_non_zeroed_slice(poly.types, data.typeIdx, context.temp_allocator)
+            poly.colors = make_non_zeroed([]Maybe(Point3DwF), data.nPoly, context.temp_allocator)
+            for &c in poly.colors {
+                c = Point3DwF{0,0,0,1}//?no matter
             }
-            poly.nodes[0].lines = resize_non_zeroed_slice( poly.nodes[0].lines, data.idx2, context.temp_allocator)
-            poly.nodes[0].nPolygons = resize_non_zeroed_slice( poly.nodes[0].nPolygons, data.nPolyLen, context.temp_allocator)
+            poly.strokeColors = nil
+            poly.thickness = nil
 
-            poly.nodes[0].color = Point3DwF{0,0,0,1}
-            poly.nodes[0].strokeColor = nil
-            poly.nodes[0].thickness = 0
-
-            rawP : ^RawShape = Shapes_ComputePolygon(&poly, context.temp_allocator)
-            defer RawShape_free(rawP, context.temp_allocator)
+            rawP , shapeErr := Shapes_ComputePolygon(&poly, context.temp_allocator)
+            if shapeErr != .None do return nil, .Ok, shapeErr
+            defer RawShape_Free(rawP, context.temp_allocator)
             
-            rawSize := RawShape_BytesSize(rawP)
+            rawSize := auto_cast RawShape_BytesSize(rawP)
             len_ := len(outData)
             non_zero_resize_dynamic_array(&outData, len_ + size_of(CharNode) + rawSize)
             (transmute([^]CharNode)(&outData[len_]))[0] = CharNode{
-                size = 0,
+                size = auto_cast rawSize,
                 char = auto_cast charCode,
                 advanceX = f32(face.glyph.advance.x) / (64.0 * SCALE_DEFAULT)
             }
@@ -241,7 +262,7 @@ Font_ConvertFontFmtToVFF :: proc(_fontFmtData:[]byte, _fontFmtFaceIdx:uint) -> (
     shrink(&outData)
 
     outSlice : []byte = outData[:] 
-    return outSlice, err
+    return outSlice, err, .None
 }
 
 Font_Init :: proc(_vffData:[]byte) -> (^Font, FontError)  {
@@ -265,7 +286,7 @@ Font_Init :: proc(_vffData:[]byte) -> (^Font, FontError)  {
     for i in 0..<charLen {
         charNode := (transmute([^]CharNode)(&_vffData[dataIdx]))[0]
         dataIdx += size_of(CharNode)
-        rawShape :^RawShape = charNode.size == 0 ? nil : RawShape_CloneFromBytes(_vffData[dataIdx:dataIdx + auto_cast charNode.size], context.allocator)
+        rawShape :^RawShape = charNode.size == 0 ? nil : RawShape_CloneFromBytes(_vffData[dataIdx:dataIdx + auto_cast charNode.size], vkDefAllocator)
         dataIdx += auto_cast charNode.size
 
         map_insert(&font.charArray, charNode.char, CharData{
@@ -281,7 +302,7 @@ Font_Deinit :: proc(self:^Font) {
     self_:^__Font = auto_cast self
     sync.mutex_lock(&self_.mutex)
     for key,value in self_.charArray {
-        RawShape_free(value.rawShape, context.allocator)
+        RawShape_Free(value.rawShape, vkDefAllocator)
     }
     delete(self_.charArray)
     sync.mutex_unlock(&self_.mutex)
@@ -297,42 +318,27 @@ Font_SetScale :: proc(self:^Font, scale:f32) {
 
 @(private="file") _Font_RenderString2 :: proc(_str:string,
 _renderOpt:FontRenderOpt2,
-vertList:^[dynamic][]shapeVertex2D,
-indList:^[dynamic][]u32,
-colorList:^[dynamic]Point3DwF,
+vertList:^[dynamic]ShapeVertex2D,
+indList:^[dynamic]u32,
 allocator : runtime.Allocator) {
-    i,idx : int
+    i : int = 0
     opt := _renderOpt.opt
 
     for r in _renderOpt.ranges {
         opt.scale = _renderOpt.opt.scale * r.scale
-        same := false
-
-        for t,i in colorList^ {
-            if t == r.color {
-                same = true
-                idx = i
-                break
-            }
-        }
-        if !same {
-            append(vertList, make_non_zeroed([]shapeVertex2D, 0, allocator))
-            append(indList, make_non_zeroed([]u32, 0, allocator))
-            append(colorList, r.color)
-            idx = len(colorList) - 1
-        }
+        opt.color = r.color
 
         if r.len == 0 || i + auto_cast r.len >= len(_str) {
-            _Font_RenderString(auto_cast r.font, _str[i:], opt, &vertList[idx], &indList[idx], allocator)
+            _Font_RenderString(auto_cast r.font, _str[i:], opt, vertList, indList, allocator)
             break;
         } else {
-            opt.offset = _Font_RenderString(auto_cast r.font, _str[i:i + auto_cast r.len], opt, &vertList[idx], &indList[idx], allocator)
+            opt.offset = _Font_RenderString(auto_cast r.font, _str[i:i + auto_cast r.len], opt, vertList, indList, allocator)
             i += auto_cast r.len
         }
     }   
 }
 
-@(private="file") _Font_RenderString :: proc(self:^__Font, _str:string, _renderOpt:FontRenderOpt, _vertArr:^[]shapeVertex2D,_indArr:^[]u32, allocator : runtime.Allocator) -> PointF {
+@(private="file") _Font_RenderString :: proc(self:^__Font, _str:string, _renderOpt:FontRenderOpt, _vertArr:^[dynamic]ShapeVertex2D,_indArr:^[dynamic]u32, allocator : runtime.Allocator) -> PointF {
     maxP : PointF = {min(f32), min(f32)}
     minP : PointF = {max(f32), max(f32)}
 
@@ -356,12 +362,13 @@ allocator : runtime.Allocator) {
 
     for &v in _vertArr^ {
         v.pos = _renderOpt.pivot * size * _renderOpt.scale
+        v.color = _renderOpt.color
     }
 
     return offset * _renderOpt.scale
 }
 
-@(private="file") _Font_RenderChar :: proc(self:^__Font, _char:rune, _vertArr:^[]shapeVertex2D, _indArr:^[]u32, offset:^PointF, area:Maybe(PointF), scale:PointF, allocator : runtime.Allocator) {
+@(private="file") _Font_RenderChar :: proc(self:^__Font, _char:rune, _vertArr:^[dynamic]ShapeVertex2D, _indArr:^[dynamic]u32, offset:^PointF, area:Maybe(PointF), scale:PointF, allocator : runtime.Allocator) {
     ok := _char in self.charArray
     charD : ^CharData
     blk: if ok {
@@ -378,8 +385,9 @@ allocator : runtime.Allocator) {
     }
     if charD.rawShape != nil {
         vlen := len(_vertArr^)
-        _vertArr^ = resize_non_zeroed_slice(_vertArr^, vlen + len(charD.rawShape.vertices[0]), allocator)
-        runtime.mem_copy_non_overlapping(&_vertArr^[vlen], &charD.rawShape.vertices[0][0], len(charD.rawShape.vertices[0]) * size_of(shapeVertex2D))
+
+        non_zero_resize_dynamic_array(_vertArr, vlen + len(charD.rawShape.vertices))
+        runtime.mem_copy_non_overlapping(&_vertArr^[vlen], &charD.rawShape.vertices[0], len(charD.rawShape.vertices) * size_of(ShapeVertex2D))
 
         i := vlen
         for ;i < len(_vertArr^);i += 1 {
@@ -388,8 +396,8 @@ allocator : runtime.Allocator) {
         }
 
         ilen := len(_indArr^)
-        _indArr^ = resize_non_zeroed_slice(_indArr^, ilen + len(charD.rawShape.indices[0]), allocator)
-        runtime.mem_copy_non_overlapping(&_indArr^[ilen], &charD.rawShape.indices[0][0], len(charD.rawShape.indices[0]) * size_of(type_of(_indArr^[0])))
+        non_zero_resize_dynamic_array(_indArr, ilen + len(charD.rawShape.indices))
+        runtime.mem_copy_non_overlapping(&_indArr^[ilen], &charD.rawShape.indices[0], len(charD.rawShape.indices) * size_of(u32))
 
         i = ilen
         for ;i < len(_indArr^);i += 1 {
@@ -400,38 +408,30 @@ allocator : runtime.Allocator) {
 }
 
 Font_RenderString2 :: proc(_str:string, _renderOpt:FontRenderOpt2, allocator := context.allocator) -> RawShape {
-    vertList := make_non_zeroed_dynamic_array([dynamic][]shapeVertex2D, allocator)
-    indList := make_non_zeroed_dynamic_array([dynamic][]u32, allocator)
-    colorList := make_non_zeroed_dynamic_array([dynamic]Point3DwF, allocator)
+    vertList := make_non_zeroed_dynamic_array([dynamic]ShapeVertex2D, allocator)
+    indList := make_non_zeroed_dynamic_array([dynamic]u32, allocator)
 
-    _Font_RenderString2(_str, _renderOpt, &vertList, &indList, &colorList, allocator)
+    _Font_RenderString2(_str, _renderOpt, &vertList, &indList,  allocator)
     shrink(&vertList)
     shrink(&indList)
-    shrink(&colorList)
     raw : RawShape = {
         vertices = vertList[:],
         indices = indList[:],
-        colors = colorList[:],
     }
     return raw
 }
 
 Font_RenderString :: proc(self:^Font, _str:string, _renderOpt:FontRenderOpt, allocator := context.allocator) -> RawShape {
-    vertList := make_non_zeroed_slice([][]shapeVertex2D, 1, allocator)
-    indList := make_non_zeroed_slice([][]u32, 1, allocator)
-    colorList := make_non_zeroed_slice([]Point3DwF, 1, allocator)
+    vertList := make_non_zeroed_dynamic_array([dynamic]ShapeVertex2D, allocator)
+    indList := make_non_zeroed_dynamic_array([dynamic]u32, allocator)
 
-    vertArray :[]shapeVertex2D = make_non_zeroed_slice([]shapeVertex2D, 0, allocator)
-    indArray :[]u32 = make_non_zeroed_slice([]u32, 0, allocator)
-    _Font_RenderString(auto_cast self, _str, _renderOpt, &vertArray, &indArray, allocator)
+    _Font_RenderString(auto_cast self, _str, _renderOpt, &vertList, &indList, allocator)
 
-    vertList[0] = vertArray
-    indList[0] = indArray
-    colorList[0] = _renderOpt.color
+    shrink(&vertList)
+    shrink(&indList)
     raw : RawShape = {
-        vertices = vertList,
-        indices = indList,
-        colors = colorList,
+        vertices = vertList[:],
+        indices = indList[:],
     }
     return raw
 }

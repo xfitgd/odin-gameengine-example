@@ -11,10 +11,11 @@ import "core:sys/posix"
 import "core:sys/windows"
 import "core:strings"
 import "core:bytes"
+import "core:thread"
 import "base:runtime"
 import "base:intrinsics"
 import vk "vendor:vulkan"
-
+import "core:fmt"
 
 @(private="file") wnd:glfw.WindowHandle = nil
 @(private="file") glfwMonitors:[dynamic]glfw.MonitorHandle
@@ -58,7 +59,7 @@ glfwStart :: proc() {
         glfw.SetWindowPos(wnd, __windowX.?, __windowY.?)
     }
 
-    CreateRenderFuncThread()
+    //CreateRenderFuncThread()
 }
 
 glfwSetFullScreenMode :: proc "contextless" (monitor:^MonitorInfo) {
@@ -133,6 +134,9 @@ glfwVulkanStart :: proc "contextless" (surface: ^vk.SurfaceKHR) {
 }
 
 glfwSystemInit :: proc() {
+    res := glfw.Init()
+    if !res do panicLog("glfw.Init : ", res)
+
     when ODIN_OS == .Linux {
         name:linux.UTS_Name
 		err := linux.uname(&name)
@@ -143,8 +147,10 @@ glfwSystemInit :: proc() {
         linuxPlatform.machine = strings.clone_from_ptr(&name.machine[0], bytes.index_byte(name.machine[:], 0))
         linuxPlatform.release = strings.clone_from_ptr(&name.release[0], bytes.index_byte(name.release[:], 0))
         linuxPlatform.version = strings.clone_from_ptr(&name.version[0], bytes.index_byte(name.version[:], 0))
-
+        println("XFIT SYSLOG : ", linuxPlatform)
+       
         processorCoreLen = auto_cast os._unix_get_nprocs()
+        println("XFIT SYSLOG processorCoreLen : ", processorCoreLen)
 	} else when ODIN_OS == .Windows {
 		//TODO
 	}
@@ -153,8 +159,6 @@ glfwSystemInit :: proc() {
 }
 
 glfwSystemStart :: proc() {
-
-
     glfwMonitorProc :: proc "c" (monitor: glfw.MonitorHandle, event: c.int) {
         sync.mutex_lock(&monitorsMtx)
         defer sync.mutex_unlock(&monitorsMtx)
@@ -297,7 +301,12 @@ glfwLoop :: proc() {
     glfw.SetWindowSizeCallback(wnd, glfwWindowSizeProc)
     glfw.SetWindowPosCallback(wnd, glfwWindowPosProc)
 
+    x, y: c.int
+    x, y = glfw.GetWindowPos(wnd)
     for !glfw.WindowShouldClose(wnd) {
-        glfw.WaitEvents()   
+        glfw.PollEvents()
+        RenderLoop()
     }
+    exiting = true
+   // thread.join(render_th)
 }

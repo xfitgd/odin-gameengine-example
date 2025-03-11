@@ -5,10 +5,12 @@ import "base:runtime"
 import "core:dynlib"
 import "core:fmt"
 import "core:math"
+import "core:math/linalg"
 import "core:mem"
 import "core:strings"
 import "core:reflect"
 import "core:sync"
+import "core:thread"
 import vk "vendor:vulkan"
 import "external/glfw"
 
@@ -36,11 +38,21 @@ vkLinearSampler: vk.Sampler
 vkNearestSampler: vk.Sampler
 
 vkRenderPass: vk.RenderPass
-vkRenderPassSample: vk.RenderPass
-vkRenderPassSampleClear: vk.RenderPass
-vkRenderPassClear: vk.RenderPass
-vkRenderPassCopy: vk.RenderPass
+// vkRenderPassClear: vk.RenderPass
+//vkRenderPassCopy: vk.RenderPass
 
+vkFrameBuffers: []vk.Framebuffer
+vkFrameDepthStencilTexture: Texture
+// vkClearFrameBuffers: []vk.Framebuffer
+
+vkFrameBufferImageViews: []vk.ImageView
+
+vkRotationMatrix: Matrix
+
+MAX_FRAMES_IN_FLIGHT :: 2
+vkImageAvailableSemaphore: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore
+vkRenderFinishedSemaphore: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore
+vkInFlightFence: [MAX_FRAMES_IN_FLIGHT]vk.Fence
 
 vkGetInstanceProcAddr: proc "system" (
 	_instance: vk.Instance,
@@ -83,42 +95,42 @@ validation_layer_support :: #force_inline proc "contextless" () -> bool {return 
 VK_KHR_portability_enumeration_support :: #force_inline proc "contextless" () -> bool {return INSTANCE_EXTENSIONS_CHECK[1]}
 VK_EXT_full_screen_exclusive_support :: #force_inline proc "contextless" () -> bool {return DEVICE_EXTENSIONS_CHECK[1]}
 
-vkShapeCurveVertShader: vk.ShaderModule
-vkShapeCurveFragShader: vk.ShaderModule
+vkShapeVertShader: vk.ShaderModule
+vkShapeFragShader: vk.ShaderModule
 //used copyScreenShaderStages
-vkQuadShapeVertShader: vk.ShaderModule
-vkQuadShapeFragShader: vk.ShaderModule
+//vkQuadShapeVertShader: vk.ShaderModule
+//vkQuadShapeFragShader: vk.ShaderModule
 vkTexVertShader: vk.ShaderModule
 vkTexFragShader: vk.ShaderModule
 vkAnimateTexVertShader: vk.ShaderModule
 vkAnimateTexFragShader: vk.ShaderModule
-vkCopyScreenFragShader: vk.ShaderModule
+//vkCopyScreenFragShader: vk.ShaderModule
 
-shapeCurveShaderStages: [2]vk.PipelineShaderStageCreateInfo
-quadShapeShaderStages: [2]vk.PipelineShaderStageCreateInfo
+shapeShaderStages: [2]vk.PipelineShaderStageCreateInfo
 texShaderStages: [2]vk.PipelineShaderStageCreateInfo
 animateTexShaderStages: [2]vk.PipelineShaderStageCreateInfo
-copyScreenShaderStages: [2]vk.PipelineShaderStageCreateInfo
+//copyScreenShaderStages: [2]vk.PipelineShaderStageCreateInfo
 
-vkQuadShapeDescriptorSetLayout: vk.DescriptorSetLayout
-vkShapeCurveDescriptorSetLayout: vk.DescriptorSetLayout
+vkShapeDescriptorSetLayout: vk.DescriptorSetLayout
 vkTexDescriptorSetLayout: vk.DescriptorSetLayout
 //used animate tex
 vkTexDescriptorSetLayout2: vk.DescriptorSetLayout
 vkAnimateTexDescriptorSetLayout: vk.DescriptorSetLayout
-vkCopyScreenDescriptorSetLayout: vk.DescriptorSetLayout
+//vkCopyScreenDescriptorSetLayout: vk.DescriptorSetLayout
 
-vkQuadShapePipelineLayout: vk.PipelineLayout
-vkShapeCurvePipelineLayout: vk.PipelineLayout
+
+vkShapePipelineLayout: vk.PipelineLayout
 vkTexPipelineLayout: vk.PipelineLayout
 vkAnimateTexPipelineLayout: vk.PipelineLayout
-vkCopyScreenPipelineLayout: vk.PipelineLayout
+//vkCopyScreenPipelineLayout: vk.PipelineLayout
 
-vkQuadShapePipeline: vk.Pipeline
-vkShapeCurvePipeline: vk.Pipeline
+vkShapePipeline: vk.Pipeline
 vkTexPipeline: vk.Pipeline
 vkAnimateTexPipeline: vk.Pipeline
-vkCopyScreenPipeline: vk.Pipeline
+//vkCopyScreenPipeline: vk.Pipeline
+
+vkCmdPool:vk.CommandPool
+vkCmdBuffer:[MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer
 
 vkPipelineX4MultisampleStateCreateInfo := vkPipelineMultisampleStateCreateInfoInit({._4})
 @(private="file") __vkColorAlphaBlendingExternalState := [1]vk.PipelineColorBlendAttachmentState{vkPipelineColorBlendAttachmentStateInit(
@@ -153,52 +165,40 @@ vkNoBlending := vkPipelineColorBlendStateCreateInfoInit(__vkNoBlendingState[:1])
 vkCopyBlending := vkPipelineColorBlendStateCreateInfoInit(__vkNoBlendingState[:1])
 
 vkInitShaderModules :: proc() {
-	vkShapeCurveVertShader = vkCreateShaderModule(#load("shaders/shapeCurveVert.spv"))
-	vkShapeCurveFragShader = vkCreateShaderModule(#load("shaders/shapeCurveFrag.spv"))
-	vkQuadShapeVertShader = vkCreateShaderModule(#load("shaders/quadShapeVert.spv"))
-	vkQuadShapeFragShader = vkCreateShaderModule(#load("shaders/quadShapeFrag.spv"))
+	vkShapeVertShader = vkCreateShaderModule(#load("shaders/shapeVert.spv"))
+	vkShapeFragShader = vkCreateShaderModule(#load("shaders/shapeFrag.spv"))
 	vkTexVertShader = vkCreateShaderModule(#load("shaders/texVert.spv"))
 	vkTexFragShader = vkCreateShaderModule(#load("shaders/texFrag.spv"))
 	vkAnimateTexVertShader = vkCreateShaderModule(#load("shaders/animateTexVert.spv"))
 	vkAnimateTexFragShader = vkCreateShaderModule(#load("shaders/animateTexFrag.spv"))
-	vkCopyScreenFragShader = vkCreateShaderModule(#load("shaders/copyScreenFrag.spv"))
+	//vkCopyScreenFragShader = vkCreateShaderModule(#load("shaders/copyScreenFrag.spv"))
 
-	shapeCurveShaderStages = vkCreateShaderStages(vkShapeCurveVertShader, vkShapeCurveFragShader)
-	quadShapeShaderStages = vkCreateShaderStages(vkQuadShapeVertShader, vkQuadShapeFragShader)
+	shapeShaderStages = vkCreateShaderStages(vkShapeVertShader, vkShapeFragShader)
 	texShaderStages = vkCreateShaderStages(vkTexVertShader, vkTexFragShader)
 	animateTexShaderStages = vkCreateShaderStages(vkAnimateTexVertShader, vkAnimateTexFragShader)
-	copyScreenShaderStages = vkCreateShaderStages(vkQuadShapeVertShader, vkCopyScreenFragShader)
+	//copyScreenShaderStages = vkCreateShaderStages(vkQuadShapeVertShader, vkCopyScreenFragShader)
 }
 
 vkCleanShaderModules :: proc() {
-	vk.DestroyShaderModule(vkDevice, vkShapeCurveVertShader, nil)
-	vk.DestroyShaderModule(vkDevice, vkShapeCurveFragShader, nil)
-	vk.DestroyShaderModule(vkDevice, vkQuadShapeVertShader, nil)
-	vk.DestroyShaderModule(vkDevice, vkQuadShapeFragShader, nil)
+	vk.DestroyShaderModule(vkDevice, vkShapeVertShader, nil)
+	vk.DestroyShaderModule(vkDevice, vkShapeFragShader, nil)
 	vk.DestroyShaderModule(vkDevice, vkTexVertShader, nil)
 	vk.DestroyShaderModule(vkDevice, vkTexFragShader, nil)
 	vk.DestroyShaderModule(vkDevice, vkAnimateTexVertShader, nil)
 	vk.DestroyShaderModule(vkDevice, vkAnimateTexFragShader, nil)
-	vk.DestroyShaderModule(vkDevice, vkCopyScreenFragShader, nil)
+	//vk.DestroyShaderModule(vkDevice, vkCopyScreenFragShader, nil)
 }
 
 vkInitPipelines :: proc() {
-	vkQuadShapeDescriptorSetLayout = vkDescriptorSetLayoutInit(
-		[]vk.DescriptorSetLayoutBinding {
-			vkDescriptorSetLayoutBindingInit(0, 1, stageFlags = {.FRAGMENT}),},
-	)
-	vkQuadShapePipelineLayout = vkPipelineLayoutInit(
-		[]vk.DescriptorSetLayout{vkQuadShapeDescriptorSetLayout},
-	)
-
-	vkShapeCurveDescriptorSetLayout = vkDescriptorSetLayoutInit(
+	vkShapeDescriptorSetLayout = vkDescriptorSetLayoutInit(
 		[]vk.DescriptorSetLayoutBinding {
 			vkDescriptorSetLayoutBindingInit(0, 1),
 			vkDescriptorSetLayoutBindingInit(1, 1),
-			vkDescriptorSetLayoutBindingInit(2, 1),},
+			vkDescriptorSetLayoutBindingInit(2, 1),
+			vkDescriptorSetLayoutBindingInit(3, 1, stageFlags = {.FRAGMENT}),},
 	)
-	vkShapeCurvePipelineLayout = vkPipelineLayoutInit(
-		[]vk.DescriptorSetLayout{vkShapeCurveDescriptorSetLayout},
+	vkShapePipelineLayout = vkPipelineLayoutInit(
+		[]vk.DescriptorSetLayout{vkShapeDescriptorSetLayout},
 	)
 
 	vkTexDescriptorSetLayout = vkDescriptorSetLayoutInit(
@@ -228,51 +228,27 @@ vkInitPipelines :: proc() {
 		[]vk.DescriptorSetLayout{vkAnimateTexDescriptorSetLayout, vkTexDescriptorSetLayout2},
 	)
 
-	vkCopyScreenDescriptorSetLayout = vkDescriptorSetLayoutInit(
-		[]vk.DescriptorSetLayoutBinding {
-			vkDescriptorSetLayoutBindingInit(
-				0, 1, descriptorType = .INPUT_ATTACHMENT, stageFlags = {.FRAGMENT}),},
-	)
-	vkCopyScreenPipelineLayout = vkPipelineLayoutInit(
-		[]vk.DescriptorSetLayout{vkCopyScreenDescriptorSetLayout},
-	)
-
-	quadStencilOp := vkStencilOpStateInit(.EQUAL, .ZERO, .ZERO, .ZERO)
-	shapeStencilOp := vkStencilOpStateInit(.ALWAYS, .ZERO, .INVERT, .ZERO)
+	// vkCopyScreenDescriptorSetLayout = vkDescriptorSetLayoutInit(
+	// 	[]vk.DescriptorSetLayoutBinding {
+	// 		vkDescriptorSetLayoutBindingInit(
+	// 			0, 1, descriptorType = .INPUT_ATTACHMENT, stageFlags = {.FRAGMENT}),},
+	// )
+	//vkCopyScreenPipelineLayout = vkPipelineLayoutInit(
+	//	[]vk.DescriptorSetLayout{vkCopyScreenDescriptorSetLayout},
+	//)
 
 	defaultDepthStencilState := vkPipelineDepthStencilStateCreateInfoInit()
-	shapeDepthStencilState := vkPipelineDepthStencilStateCreateInfoInit(
-		stencilTestEnable = true,
-		front = shapeStencilOp,
-		back = shapeStencilOp,
-	)
-	quadDepthStencilState := vkPipelineDepthStencilStateCreateInfoInit(
-		depthTestEnable = false,
-		depthWriteEnable = false,
-		stencilTestEnable = true,
-		front = quadStencilOp,
-		back = quadStencilOp,
-	)
 
-	pipelines:[5]vk.Pipeline
+	pipelines:[3]vk.Pipeline
 	pipelineCreateInfos:[len(pipelines)]vk.GraphicsPipelineCreateInfo
 
-	pipelineCreateInfos[0] = vkGraphicsPipelineCreateInfoInit(
-		stages = quadShapeShaderStages[:2],
-		layout = vkQuadShapePipelineLayout,
-		renderPass = vkRenderPassSample,
-		pMultisampleState = &vkPipelineX4MultisampleStateCreateInfo,
-		pDepthStencilState = &quadDepthStencilState,
-		pColorBlendState = &vkColorAlphaBlendingExternal,
-	)
-
-	shapeCurveVertexInputBindingDescription := [1]vk.VertexInputBindingDescription{{
+	shapeVertexInputBindingDescription := [1]vk.VertexInputBindingDescription{{
 		binding = 0,
-		stride = size_of(f32) * (2 + 3),
+		stride = size_of(f32) * (2 + 3 + 4),
 		inputRate = .VERTEX,
 	}}
 
-	shapeCurveVertexInputAttributeDescription := [2]vk.VertexInputAttributeDescription{{
+	shapeVertexInputAttributeDescription := [3]vk.VertexInputAttributeDescription{{
 		location = 0,
 		binding = 0,
 		format = vk.Format.R32G32_SFLOAT,
@@ -283,69 +259,76 @@ vkInitPipelines :: proc() {
 		binding = 0,
 		format = vk.Format.R32G32B32_SFLOAT,
 		offset = size_of(f32) * 2,
+	},
+	{
+		location = 2,
+		binding = 0,
+		format = vk.Format.R32G32B32A32_SFLOAT,
+		offset = size_of(f32) * (2 + 3),
 	}}
-	shapeCurveVertexInputState := vkPipelineVertexInputStateCreateInfoInit(shapeCurveVertexInputBindingDescription[:], shapeCurveVertexInputAttributeDescription[:])
-	pipelineCreateInfos[1] = vkGraphicsPipelineCreateInfoInit(
-		stages = shapeCurveShaderStages[:],
-		layout = vkShapeCurvePipelineLayout,
-		renderPass = vkRenderPassSample,
-		pMultisampleState = &vkPipelineX4MultisampleStateCreateInfo,
-		pDepthStencilState = &shapeDepthStencilState,
-		pColorBlendState = &vkNoBlending,
-		pVertexInputState = &shapeCurveVertexInputState,
+	viewportState := vkPipelineViewportStateCreateInfoInit()
+	shapeVertexInputState := vkPipelineVertexInputStateCreateInfoInit(shapeVertexInputBindingDescription[:], shapeVertexInputAttributeDescription[:])
+	pipelineCreateInfos[0] = vkGraphicsPipelineCreateInfoInit(
+		stages = shapeShaderStages[:],
+		layout = vkShapePipelineLayout,
+		renderPass = vkRenderPass,
+		pMultisampleState = &vkDefaultPipelineMultisampleStateCreateInfo,
+		pDepthStencilState = &defaultDepthStencilState,
+		pColorBlendState = &vkDefaultPipelineColorBlendStateCreateInfo,
+		pVertexInputState = &shapeVertexInputState,
+		pViewportState = &viewportState,
 	)
-	pipelineCreateInfos[2] = vkGraphicsPipelineCreateInfoInit(
+	pipelineCreateInfos[1] = vkGraphicsPipelineCreateInfoInit(
 		stages = texShaderStages[:],
 		layout = vkTexPipelineLayout,
 		renderPass = vkRenderPass,
 		pMultisampleState = &vkDefaultPipelineMultisampleStateCreateInfo,
 		pDepthStencilState = &defaultDepthStencilState,
 		pColorBlendState = &vkDefaultPipelineColorBlendStateCreateInfo,
+		pViewportState = &viewportState,
 	)
-	pipelineCreateInfos[3] = vkGraphicsPipelineCreateInfoInit(
+	pipelineCreateInfos[2] = vkGraphicsPipelineCreateInfoInit(
 		stages = animateTexShaderStages[:],
 		layout = vkAnimateTexPipelineLayout,
 		renderPass = vkRenderPass,
 		pMultisampleState = &vkDefaultPipelineMultisampleStateCreateInfo,
 		pDepthStencilState = &defaultDepthStencilState,
 		pColorBlendState = &vkDefaultPipelineColorBlendStateCreateInfo,
+		pViewportState = &viewportState,
 	)
-	pipelineCreateInfos[4] = vkGraphicsPipelineCreateInfoInit(
-		stages = copyScreenShaderStages[:],
-		layout = vkCopyScreenPipelineLayout,
-		renderPass = vkRenderPassCopy,
-		pMultisampleState = &vkDefaultPipelineMultisampleStateCreateInfo,
-		pDepthStencilState = nil,
-		pColorBlendState = &vkCopyBlending,
-	)
+	// pipelineCreateInfos[3] = vkGraphicsPipelineCreateInfoInit(
+	// 	stages = copyScreenShaderStages[:],
+	// 	layout = vkCopyScreenPipelineLayout,
+	// 	renderPass = vkRenderPassCopy,
+	// 	pMultisampleState = &vkDefaultPipelineMultisampleStateCreateInfo,
+	// 	pDepthStencilState = nil,
+	// 	pColorBlendState = &vkCopyBlending,
+	// 	pViewportState = &viewportState,
+	// )
 	vk.CreateGraphicsPipelines(vkDevice, 0, len(pipelines), raw_data(pipelineCreateInfos[:]), nil, raw_data(pipelines[:]))
 
-	vkQuadShapePipeline = pipelines[0]
-	vkShapeCurvePipeline = pipelines[1]
-	vkTexPipeline = pipelines[2]
-	vkAnimateTexPipeline = pipelines[3]
-	vkCopyScreenPipeline = pipelines[4]
+	vkShapePipeline = pipelines[0]
+	vkTexPipeline = pipelines[1]
+	vkAnimateTexPipeline = pipelines[2]
+	//vkCopyScreenPipeline = pipelines[3]
 }
 
 vkCleanPipelines :: proc() {
-	vk.DestroyDescriptorSetLayout(vkDevice, vkQuadShapeDescriptorSetLayout, nil)
-	vk.DestroyDescriptorSetLayout(vkDevice, vkShapeCurveDescriptorSetLayout, nil)
+	vk.DestroyDescriptorSetLayout(vkDevice, vkShapeDescriptorSetLayout, nil)
 	vk.DestroyDescriptorSetLayout(vkDevice, vkTexDescriptorSetLayout, nil)
 	vk.DestroyDescriptorSetLayout(vkDevice, vkTexDescriptorSetLayout2, nil)
 	vk.DestroyDescriptorSetLayout(vkDevice, vkAnimateTexDescriptorSetLayout, nil)
-	vk.DestroyDescriptorSetLayout(vkDevice, vkCopyScreenDescriptorSetLayout, nil)
+	//vk.DestroyDescriptorSetLayout(vkDevice, vkCopyScreenDescriptorSetLayout, nil)
 
-	vk.DestroyPipelineLayout(vkDevice, vkQuadShapePipelineLayout, nil)
-	vk.DestroyPipelineLayout(vkDevice, vkShapeCurvePipelineLayout, nil)
+	vk.DestroyPipelineLayout(vkDevice, vkShapePipelineLayout, nil)
 	vk.DestroyPipelineLayout(vkDevice, vkTexPipelineLayout, nil)
 	vk.DestroyPipelineLayout(vkDevice, vkAnimateTexPipelineLayout, nil)
-	vk.DestroyPipelineLayout(vkDevice, vkCopyScreenPipelineLayout, nil)
+	//vk.DestroyPipelineLayout(vkDevice, vkCopyScreenPipelineLayout, nil)
 
-	vk.DestroyPipeline(vkDevice, vkQuadShapePipeline, nil)
-	vk.DestroyPipeline(vkDevice, vkShapeCurvePipeline, nil)
+	vk.DestroyPipeline(vkDevice, vkShapePipeline, nil)
 	vk.DestroyPipeline(vkDevice, vkTexPipeline, nil)
 	vk.DestroyPipeline(vkDevice, vkAnimateTexPipeline, nil)
-	vk.DestroyPipeline(vkDevice, vkCopyScreenPipeline, nil)
+	//vk.DestroyPipeline(vkDevice, vkCopyScreenPipeline, nil)
 }
 
 vkFmts:[]vk.SurfaceFormatKHR
@@ -368,6 +351,9 @@ vkColorHasAttachOptimal:=false
 vkColorHasSampleOptimal:=false
 vkColorHasTransferSrcOptimal:=false
 vkColorHasTransferDstOptimal:=false
+
+vkReleasedFullScreenEx := true
+
 
 initSwapChain :: proc() {
 	fmtCnt:u32
@@ -393,7 +379,7 @@ initSwapChain :: proc() {
 
 	depthProp:vk.FormatProperties
 	vk.GetPhysicalDeviceFormatProperties(vkPhysicalDevice, .D24_UNORM_S8_UINT, &depthProp)
-	vkDepthHasOptimal := .DEPTH_STENCIL_ATTACHMENT in depthProp.optimalTilingFeatures
+	vkDepthHasOptimal = .DEPTH_STENCIL_ATTACHMENT in depthProp.optimalTilingFeatures
 
 	__depthFmt = .D24UnormS8Uint
 	if !vkDepthHasOptimal && .DEPTH_STENCIL_ATTACHMENT in depthProp.linearTilingFeatures {//not support D24_UNORM_S8_UINT
@@ -433,15 +419,20 @@ initSwapChain :: proc() {
 	}
 }
 
-createSwapChainAndImageViews :: proc() {
+vkCreateSwapChainAndImageViews :: proc() {
 	vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(vkPhysicalDevice, vkSurface, &vkSurfaceCap)
 
-	vkExtent = vkSurfaceCap.currentExtent
 	if(vkSurfaceCap.currentExtent.width == max(u32)) {
 		vkSurfaceCap.currentExtent.width = clamp(__windowWidth.?, vkSurfaceCap.minImageExtent.width, vkSurfaceCap.maxImageExtent.width)
 		vkSurfaceCap.currentExtent.height = clamp(__windowHeight.?, vkSurfaceCap.minImageExtent.height, vkSurfaceCap.maxImageExtent.height)
 	}
+	vkExtent = vkSurfaceCap.currentExtent
 	vkExtent_rotation = vkExtent
+
+	if vkExtent.width == 0 || vkExtent.height == 0 {
+		return
+	}
+	
 	if is_mobile {
 		if .ROTATE_90 in vkSurfaceCap.currentTransform {
 			vkExtent_rotation.width = vkExtent.height
@@ -488,6 +479,7 @@ createSwapChainAndImageViews :: proc() {
 			}
 		}
 	}
+	programStart = false
 
 	surfaceImgCnt := max(__swapImgCnt ,vkSurfaceCap.minImageCount)
 	if vkSurfaceCap.maxImageCount > 0 && surfaceImgCnt > vkSurfaceCap.maxImageCount {//0 is no limit max+
@@ -505,7 +497,7 @@ createSwapChainAndImageViews :: proc() {
 		imageUsage = {.COLOR_ATTACHMENT},
 		presentMode = vkPresentMode,
 		preTransform = vkSurfaceCap.currentTransform,
-		compositeAlpha = vkSurfaceCap.supportedCompositeAlpha,
+		compositeAlpha = {.OPAQUE},
 		clipped = true,
 		oldSwapchain = 0,
 		imageSharingMode = .EXCLUSIVE,
@@ -530,7 +522,7 @@ createSwapChainAndImageViews :: proc() {
 				fullScreenInfo.pNext = &fullScreenWinInfo
 			}
 			swapChainCreateInfo.pNext = &fullScreenInfo
-		}
+		}i
 	}
 	queueFamiliesIndices := [2]u32{vkGraphicsFamilyIndex, vkPresentFamilyIndex}
 	if vkGraphicsFamilyIndex != vkPresentFamilyIndex {
@@ -540,14 +532,59 @@ createSwapChainAndImageViews :: proc() {
 	}
 
 	res := vk.CreateSwapchainKHR(vkDevice, &swapChainCreateInfo, nil, &vkSwapchain)
-	if res != .SUCCESS do panicLog("res = vk.CreateSwapchainKHR(vkDevice, &swapChainCreateInfo, nil, &vkSwapchain) : ", res)
+	if res != .SUCCESS do panicLog("res = vk.CreateSwapchainKHR(vkDevce, &swapChainCreateInfo, nil, &vkSwapchain) : ", res)
 
 	vk.GetSwapchainImagesKHR(vkDevice, vkSwapchain, &__swapImgCnt, nil)
 	swapImgs:= make_non_zeroed([]vk.Image, __swapImgCnt, context.temp_allocator)
 	defer delete(swapImgs, context.temp_allocator)
+	vk.GetSwapchainImagesKHR(vkDevice, vkSwapchain, &__swapImgCnt, &swapImgs[0])
 
+	vkFrameBuffers = make_non_zeroed([]vk.Framebuffer, __swapImgCnt)
+	//vkClearFrameBuffers = make_non_zeroed([]vk.Framebuffer, __swapImgCnt)
+	vkFrameBufferImageViews = make_non_zeroed([]vk.ImageView, __swapImgCnt)
+
+	
+	Texture_InitDepthStencil(&vkFrameDepthStencilTexture, vkExtent_rotation.width, vkExtent_rotation.height)
+	vkRefreshPreMatrix()
+	vkOpExecute(true)
 	for img, i in swapImgs {
-		//TODO
+		imageViewCreateInfo := vk.ImageViewCreateInfo{
+			sType = vk.StructureType.IMAGE_VIEW_CREATE_INFO,
+			image = img,
+			viewType = .D2,
+			format = vkFmt.format,
+			components = {
+				r = .IDENTITY,
+				g = .IDENTITY,
+				b = .IDENTITY,
+				a = .IDENTITY,
+			},
+			subresourceRange = {
+				aspectMask = {.COLOR},
+				baseMipLevel = 0,
+				levelCount = 1,
+				baseArrayLayer = 0,
+				layerCount = 1,
+			},
+		}
+		res = vk.CreateImageView(vkDevice, &imageViewCreateInfo, nil, &vkFrameBufferImageViews[i])
+		if res != .SUCCESS do panicLog("res = vk.CreateImageView(vkDevice, &imageViewCreateInfo, nil, &vkFrameBufferImageViews[i]) : ", res)
+
+		frameBufferCreateInfo := vk.FramebufferCreateInfo{
+			sType = vk.StructureType.FRAMEBUFFER_CREATE_INFO,
+			renderPass = vkRenderPass,
+			attachmentCount = 2,
+			pAttachments = &([]vk.ImageView{vkFrameBufferImageViews[i], vkFrameDepthStencilTexture.__in.texture.imgView})[0],
+			width = vkExtent.width,
+			height = vkExtent.height,
+			layers = 1,
+		}
+		res = vk.CreateFramebuffer(vkDevice, &frameBufferCreateInfo, nil, &vkFrameBuffers[i])
+		if res != .SUCCESS do panicLog("res = vk.CreateFramebuffer(vkDevice, &frameBufferCreateInfo, nil, &vkFrameBuffers[i]) : ", res)
+
+		// frameBufferCreateInfo.renderPass = vkRenderPassClear
+		// res = vk.CreateFramebuffer(vkDevice, &frameBufferCreateInfo, nil, &vkClearFrameBuffers[i])
+		// if res != .SUCCESS do panicLog("res = vk.CreateFramebuffer(vkDevice, &frameBufferCreateInfo, nil, &vkClearFrameBuffers[i]) : ", res)
 	}
 } 
 
@@ -604,8 +641,7 @@ vkStart :: proc() {
 
 	for &l in availableLayers {
 		for _, i in LAYERS {
-			if !LAYERS_CHECK[i] &&
-			   mem.compare((transmute([^]byte)LAYERS[i])[:len(LAYERS[i])], l.layerName[:len(LAYERS[i])]) == 0 {
+			if !LAYERS_CHECK[i] && mem.compare((transmute([^]byte)LAYERS[i])[:len(LAYERS[i])], l.layerName[:len(LAYERS[i])]) == 0 {
 				when !ODIN_DEBUG {
 					if LAYERS[i] == "VK_LAYER_KHRONOS_validation" do continue
 				}
@@ -628,7 +664,7 @@ vkStart :: proc() {
 
 	for &e in availableInstanceExts {
 		for _, i in INSTANCE_EXTENSIONS {
-			if !LAYERS_CHECK[i] &&
+			if !INSTANCE_EXTENSIONS_CHECK[i] &&
 			   mem.compare((transmute([^]byte)INSTANCE_EXTENSIONS[i])[:len(INSTANCE_EXTENSIONS[i])], e.extensionName[:len(INSTANCE_EXTENSIONS[i])]) == 0 {
 				non_zero_append(&instanceExtNames, INSTANCE_EXTENSIONS[i])
 				INSTANCE_EXTENSIONS_CHECK[i] = true
@@ -649,10 +685,7 @@ vkStart :: proc() {
 
 	when is_android {
 		non_zero_append(&instanceExtNames, "VK_KHR_android_surface")
-	} else when ODIN_OS == .Linux {
-		non_zero_append(&instanceExtNames, "VK_KHR_xlib_surface")
-	} else when ODIN_OS == .Windows {
-		non_zero_append(&instanceExtNames, vk.KHR_WIN32_SURFACE_EXTENSION_NAME)
+	} else {
 	}
 
 	when !is_mobile {
@@ -666,6 +699,7 @@ vkStart :: proc() {
 	}
 
 	instanceCreateInfo := vk.InstanceCreateInfo {
+		sType                   = vk.StructureType.INSTANCE_CREATE_INFO,
 		pApplicationInfo        = &appInfo,
 		enabledLayerCount       = auto_cast len(layerNames),
 		ppEnabledLayerNames     = &layerNames[0] if len(layerNames) > 0 else nil,
@@ -682,9 +716,10 @@ vkStart :: proc() {
 
 	if validation_layer_support() && ODIN_DEBUG {
 		debugUtilsCreateInfo := vk.DebugUtilsMessengerCreateInfoEXT {
+			sType = vk.StructureType.DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
 			messageSeverity = vk.DebugUtilsMessageSeverityFlagsEXT{.ERROR, .VERBOSE, .WARNING},
 			messageType     = vk.DebugUtilsMessageTypeFlagsEXT {.GENERAL, .VALIDATION, .PERFORMANCE},
-			pfnUserCallback = nil,
+			pfnUserCallback = vkDebugCallBack,
 			pUserData       = nil,
 		}
 		vk.CreateDebugUtilsMessengerEXT(
@@ -695,12 +730,7 @@ vkStart :: proc() {
 		)
 	}
 
-	when is_android {
-		//TODO LOAD FUNC
-		vulkanAndroidStart(&vkSurface)
-	} else {// !ismobile
-		glfwVulkanStart(&vkSurface)
-	}
+	vkCreateSurface()
 
 	physicalDeviceCnt: u32
 	vk.EnumeratePhysicalDevices(vkInstance, &physicalDeviceCnt, nil)
@@ -747,7 +777,7 @@ vkStart :: proc() {
 
 	physicalDeviceFeatures := vk.PhysicalDeviceFeatures {
 		samplerAnisotropy = true,
-		sampleRateShading = true, //FOR ANTI-ALISING
+		sampleRateShading = true, //FOR ANTI-ALISING //TODO
 	}
 
 	deviceExtCnt: u32
@@ -777,7 +807,7 @@ vkStart :: proc() {
 	deviceCreateInfo := vk.DeviceCreateInfo {
 		sType                   = vk.StructureType.DEVICE_CREATE_INFO,
 		pQueueCreateInfos       = &deviceQueueCreateInfos[0],
-		queueCreateInfoCount    = len(deviceQueueCreateInfos),
+		queueCreateInfoCount    = queueCnt,
 		pEnabledFeatures        = &physicalDeviceFeatures,
 		ppEnabledExtensionNames = &deviceExtNames[0],
 		enabledExtensionCount   = auto_cast len(deviceExtNames),
@@ -797,11 +827,29 @@ vkStart :: proc() {
 		vk.GetDeviceQueue(vkDevice, vkPresentFamilyIndex, 0, &vkPresentQueue)
 	}
 
+	res = vk.CreateCommandPool(vkDevice, &vk.CommandPoolCreateInfo{
+		sType = vk.StructureType.COMMAND_POOL_CREATE_INFO,
+		flags = vk.CommandPoolCreateFlags{.RESET_COMMAND_BUFFER},
+		queueFamilyIndex = vkGraphicsFamilyIndex,
+	}, nil, &vkCmdPool)
+	if res != .SUCCESS do panicLog("vk.CreateCommandPool(&vkCmdPool) : ", res)
+
+	res = vk.AllocateCommandBuffers(vkDevice, &vk.CommandBufferAllocateInfo{
+		sType = vk.StructureType.COMMAND_BUFFER_ALLOCATE_INFO,
+		commandPool = vkCmdPool,
+		level = vk.CommandBufferLevel.PRIMARY,
+		commandBufferCount = MAX_FRAMES_IN_FLIGHT,
+	}, &vkCmdBuffer[0])
+	if res != .SUCCESS do panicLog("vk.AllocateCommandBuffers(&vkCmdBuffer) : ", res)
+
+	RenderCmd_Create()
+
 	vkInitBlockLen()
 	vkAllocatorInit()
 
+	Graphics_Create()
+
 	initSwapChain()
-	createSwapChainAndImageViews()
 
 	samplerInfo := vk.SamplerCreateInfo {
 		sType                   = vk.StructureType.SAMPLER_CREATE_INFO,
@@ -828,73 +876,71 @@ vkStart :: proc() {
 	vk.CreateSampler(vkDevice, &samplerInfo, nil, &vkNearestSampler)
 
 	vkDepthFmt := TextureFmtToVkFmt(__depthFmt)
-	depthAttachmentSample := vkAttachmentDescriptionInit(
-		format = vkDepthFmt,
-		loadOp = .LOAD,
-		storeOp = .STORE,
-		stencilLoadOp = .CLEAR,
-		stencilStoreOp = .STORE,
-		initialLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-		finalLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-		samples = {vk.SampleCountFlag._4},
-	)
-	depthAttachmentSampleClear := vkAttachmentDescriptionInit(
-		format = vkDepthFmt,
-		loadOp = .CLEAR,
-		storeOp = .STORE,
-		finalLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-		samples = {vk.SampleCountFlag._4},
-	)
-	colorAttachmentSampleClear := vkAttachmentDescriptionInit(
-		format = vkFmt.format,
-		loadOp = .CLEAR,
-		storeOp = .STORE,
-		finalLayout = .COLOR_ATTACHMENT_OPTIMAL,
-		samples = {vk.SampleCountFlag._4},
-	)
-	colorAttachmentSample := vkAttachmentDescriptionInit(
-		format = vkFmt.format,
-		loadOp = .LOAD,
-		storeOp = .STORE,
-		initialLayout = .COLOR_ATTACHMENT_OPTIMAL,
-		finalLayout = .COLOR_ATTACHMENT_OPTIMAL,
-		samples = {vk.SampleCountFlag._4},
-	)
-	colorAttachmentResolve := vkAttachmentDescriptionInit(
-		format = vkFmt.format,
-		storeOp = .STORE,
-		finalLayout = .COLOR_ATTACHMENT_OPTIMAL,
-	)
-	colorAttachmentLoadResolve := vkAttachmentDescriptionInit(
-		format = vkFmt.format,
-		loadOp = .LOAD,
-		initialLayout = .COLOR_ATTACHMENT_OPTIMAL,
-		finalLayout = .COLOR_ATTACHMENT_OPTIMAL,
-	)
-	colorAttachmentClear := vkAttachmentDescriptionInit(
-		format = vkFmt.format,
-		loadOp = .CLEAR,
-		storeOp = .STORE,
-		finalLayout = .PRESENT_SRC_KHR,
-	)
-	depthAttachmentClear := vkAttachmentDescriptionInit(
-		format = vkDepthFmt,
-		loadOp = .CLEAR,
-		storeOp = .STORE,
-		finalLayout = .PRESENT_SRC_KHR,
-	)
+	// depthAttachmentSample := vkAttachmentDescriptionInit(
+	// 	format = vkDepthFmt,
+	// 	loadOp = .LOAD,
+	// 	storeOp = .STORE,
+	// 	stencilLoadOp = .CLEAR,
+	// 	stencilStoreOp = .STORE,
+	// 	initialLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+	// 	finalLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+	// 	samples = {vk.SampleCountFlag._4},
+	// )
+	// depthAttachmentSampleClear := vkAttachmentDescriptionInit(
+	// 	format = vkDepthFmt,
+	// 	loadOp = .CLEAR,
+	// 	storeOp = .STORE,
+	// 	finalLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+	// 	samples = {vk.SampleCountFlag._4},
+	// )
+	// colorAttachmentSampleClear := vkAttachmentDescriptionInit(
+	// 	format = vkFmt.format,
+	// 	loadOp = .CLEAR,
+	// 	storeOp = .STORE,
+	// 	finalLayout = .COLOR_ATTACHMENT_OPTIMAL,
+	// 	samples = {vk.SampleCountFlag._4},
+	// )
+	// colorAttachmentSample := vkAttachmentDescriptionInit(
+	// 	format = vkFmt.format,
+	// 	loadOp = .LOAD,
+	// 	storeOp = .STORE,
+	// 	initialLayout = .COLOR_ATTACHMENT_OPTIMAL,
+	// 	finalLayout = .COLOR_ATTACHMENT_OPTIMAL,
+	// 	samples = {vk.SampleCountFlag._4},
+	// )
+	// colorAttachmentResolve := vkAttachmentDescriptionInit(
+	// 	format = vkFmt.format,
+	// 	storeOp = .STORE,
+	// 	finalLayout = .COLOR_ATTACHMENT_OPTIMAL,
+	// )
+	// colorAttachmentLoadResolve := vkAttachmentDescriptionInit(
+	// 	format = vkFmt.format,
+	// 	loadOp = .LOAD,
+	// 	initialLayout = .COLOR_ATTACHMENT_OPTIMAL,
+	// 	finalLayout = .COLOR_ATTACHMENT_OPTIMAL,
+	// )
+	// colorAttachmentClear := vkAttachmentDescriptionInit(
+	// 	format = vkFmt.format,
+	// 	loadOp = .CLEAR,
+	// 	storeOp = .STORE,
+	// 	finalLayout = .PRESENT_SRC_KHR,
+	// )
+	// depthAttachmentClear := vkAttachmentDescriptionInit(
+	// 	format = vkDepthFmt,
+	// 	loadOp = .CLEAR,
+	// 	storeOp = .STORE,
+	// 	finalLayout = .PRESENT_SRC_KHR,
+	// )
 	colorAttachment := vkAttachmentDescriptionInit(
 		format = vkFmt.format,
-		loadOp = .LOAD,
+		loadOp = .CLEAR,
 		storeOp = .STORE,
-		initialLayout = .PRESENT_SRC_KHR,
 		finalLayout = .PRESENT_SRC_KHR,
 	)
 	depthAttachment := vkAttachmentDescriptionInit(
 		format = vkDepthFmt,
-		loadOp = .LOAD,
+		loadOp = .CLEAR,
 		storeOp = .STORE,
-		initialLayout = .PRESENT_SRC_KHR,
 		finalLayout = .PRESENT_SRC_KHR,
 	)
 
@@ -902,18 +948,18 @@ vkStart :: proc() {
 		attachment = 0,
 		layout     = .COLOR_ATTACHMENT_OPTIMAL,
 	}
-	colorResolveAttachmentRef := vk.AttachmentReference {
-		attachment = 2,
-		layout     = .COLOR_ATTACHMENT_OPTIMAL,
-	}
+	// colorResolveAttachmentRef := vk.AttachmentReference {
+	// 	attachment = 2,
+	// 	layout     = .COLOR_ATTACHMENT_OPTIMAL,
+	// }
 	depthAttachmentRef := vk.AttachmentReference {
 		attachment = 1,
 		layout     = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
 	}
-	inputAttachmentRef := vk.AttachmentReference {
-		attachment = 1,
-		layout     = .SHADER_READ_ONLY_OPTIMAL,
-	}
+	// inputAttachmentRef := vk.AttachmentReference {
+	// 	attachment = 1,
+	// 	layout     = .SHADER_READ_ONLY_OPTIMAL,
+	// }
 
 	subpassDesc := vk.SubpassDescription {
 		pipelineBindPoint       = .GRAPHICS,
@@ -921,54 +967,32 @@ vkStart :: proc() {
 		pColorAttachments       = &colorAttachmentRef,
 		pDepthStencilAttachment = &depthAttachmentRef,
 	}
-	subpassResolveDesc := subpassDesc
-	subpassResolveDesc.pResolveAttachments = &colorResolveAttachmentRef
-	subpassCopyDesc := vk.SubpassDescription {
-		pipelineBindPoint    = .GRAPHICS,
-		colorAttachmentCount = 1,
-		inputAttachmentCount = 1,
-		pColorAttachments    = &colorAttachmentRef,
-		pInputAttachments    = &inputAttachmentRef,
-	}
+	// subpassResolveDesc := subpassDesc
+	// subpassResolveDesc.pResolveAttachments = &colorResolveAttachmentRef
+	// subpassCopyDesc := vk.SubpassDescription {
+	// 	pipelineBindPoint    = .GRAPHICS,
+	// 	colorAttachmentCount = 1,
+	// 	inputAttachmentCount = 1,
+	// 	pColorAttachments    = &colorAttachmentRef,
+	// 	pInputAttachments    = &inputAttachmentRef,
+	// }
 
 	subpassDependency := vk.SubpassDependency {
 		srcSubpass    = vk.SUBPASS_EXTERNAL,
 		dstSubpass    = 0,
-		srcStageMask  = {.COLOR_ATTACHMENT_OUTPUT, .LATE_FRAGMENT_TESTS},
+		srcStageMask  = {.COLOR_ATTACHMENT_OUTPUT, .EARLY_FRAGMENT_TESTS},
 		srcAccessMask = {},
 		dstStageMask  = {.COLOR_ATTACHMENT_OUTPUT, .EARLY_FRAGMENT_TESTS},
-		dstAccessMask = {.COLOR_ATTACHMENT_READ, .DEPTH_STENCIL_ATTACHMENT_READ},
+		dstAccessMask = {.COLOR_ATTACHMENT_WRITE, .DEPTH_STENCIL_ATTACHMENT_WRITE},
 	}
-	subpassDependencyCopy := vk.SubpassDependency {
-		srcSubpass    = vk.SUBPASS_EXTERNAL,
-		dstSubpass    = 0,
-		srcStageMask  = {.COLOR_ATTACHMENT_OUTPUT},
-		srcAccessMask = {},
-		dstStageMask  = {.COLOR_ATTACHMENT_OUTPUT},
-		dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
-	}
-
-	renderPassSampleInfo := vkRenderPassCreateInfoInit(
-		pAttachments = []vk.AttachmentDescription {
-			colorAttachmentSample,
-			depthAttachmentSample,
-			colorAttachmentResolve,
-		},
-		pSubpasses = []vk.SubpassDescription{subpassResolveDesc},
-		pDependencies = []vk.SubpassDependency{subpassDependency},
-	)
-	vk.CreateRenderPass(vkDevice, &renderPassSampleInfo, nil, &vkRenderPassSample)
-
-	renderPassSampleClearInfo := vkRenderPassCreateInfoInit(
-		pAttachments = []vk.AttachmentDescription {
-			colorAttachmentSampleClear,
-			depthAttachmentSampleClear,
-			colorAttachmentResolve,
-		},
-		pSubpasses = []vk.SubpassDescription{subpassResolveDesc},
-		pDependencies = []vk.SubpassDependency{subpassDependency},
-	)
-	vk.CreateRenderPass(vkDevice, &renderPassSampleClearInfo, nil, &vkRenderPassSampleClear)
+	// subpassDependencyCopy := vk.SubpassDependency {
+	// 	srcSubpass    = vk.SUBPASS_EXTERNAL,
+	// 	dstSubpass    = 0,
+	// 	srcStageMask  = {.COLOR_ATTACHMENT_OUTPUT},
+	// 	srcAccessMask = {},
+	// 	dstStageMask  = {.COLOR_ATTACHMENT_OUTPUT},
+	// 	dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
+	// }
 
 	renderPassInfo := vkRenderPassCreateInfoInit(
 		pAttachments = []vk.AttachmentDescription{colorAttachment, depthAttachment},
@@ -977,19 +1001,22 @@ vkStart :: proc() {
 	)
 	vk.CreateRenderPass(vkDevice, &renderPassInfo, nil, &vkRenderPass)
 
-	renderPassClearInfo := vkRenderPassCreateInfoInit(
-		pAttachments = []vk.AttachmentDescription{colorAttachmentClear, depthAttachmentClear},
-		pSubpasses = []vk.SubpassDescription{subpassDesc},
-		pDependencies = []vk.SubpassDependency{subpassDependency},
-	)
-	vk.CreateRenderPass(vkDevice, &renderPassClearInfo, nil, &vkRenderPassClear)
+	// renderPassClearInfo := vkRenderPassCreateInfoInit(
+	// 	pAttachments = []vk.AttachmentDescription{colorAttachmentClear, depthAttachmentClear},
+	// 	pSubpasses = []vk.SubpassDescription{subpassDesc},
+	// 	pDependencies = []vk.SubpassDependency{subpassDependency},
+	// )
+	// vk.CreateRenderPass(vkDevice, &renderPassClearInfo, nil, &vkRenderPassClear)
 
-	renderPassCopyInfo := vkRenderPassCreateInfoInit(
-		pAttachments = []vk.AttachmentDescription{colorAttachment, colorAttachmentLoadResolve},
-		pSubpasses = []vk.SubpassDescription{subpassCopyDesc},
-		pDependencies = []vk.SubpassDependency{subpassDependencyCopy},
-	)
-	vk.CreateRenderPass(vkDevice, &renderPassCopyInfo, nil, &vkRenderPassCopy)
+	// renderPassCopyInfo := vkRenderPassCreateInfoInit(
+	// 	pAttachments = []vk.AttachmentDescription{colorAttachment, colorAttachmentLoadResolve},
+	// 	pSubpasses = []vk.SubpassDescription{subpassCopyDesc},
+	// 	pDependencies = []vk.SubpassDependency{subpassDependencyCopy},
+	// )
+	// vk.CreateRenderPass(vkDevice, &renderPassCopyInfo, nil, &vkRenderPassCopy)
+
+	vkCreateSwapChainAndImageViews()
+	vkCreateSyncObject()
 
 	vkInitShaderModules()
 
@@ -997,8 +1024,37 @@ vkStart :: proc() {
 }
 
 vkDestory :: proc() {
+	Graphics_Clean()
+
+	vkCleanSyncObject()
+	vkCleanSwapChain()
 	vkCleanPipelines()
 	vkCleanShaderModules()
+
+	vkAllocatorDestroy()
+
+	vk.DestroyCommandPool(vkDevice, vkCmdPool, nil)
+
+	vk.DestroySampler(vkDevice, vkLinearSampler, nil)
+	vk.DestroySampler(vkDevice, vkNearestSampler, nil)
+
+	vk.DestroyRenderPass(vkDevice, vkRenderPass, nil)
+	// vk.DestroyRenderPass(vkDevice, vkRenderPassClear, nil)
+
+	delete(vkFmts)
+	RenderCmd_Clean()
+
+	vk.DestroySurfaceKHR(vkInstance, vkSurface, nil)
+
+	vk.DestroyDevice(vkDevice, nil)
+	when ODIN_DEBUG {
+		if vkDebugUtilsMessenger != 0 {
+			vk.DestroyDebugUtilsMessengerEXT(vkInstance, vkDebugUtilsMessenger, nil)
+		}
+	}
+
+	vk.DestroyInstance(vkInstance, nil)
+
 	dynlib.unload_library(vkLibrary)
 }
 
@@ -1018,29 +1074,317 @@ vkWaitPresentIdle :: proc() {
 }
 
 vkRecreateSwapChain :: proc() {
-	//TODO
+	if vkDevice == nil {
+		return
+	}
+	sync.mutex_lock(&fullScreenMtx)
+
+	vkReleaseFullScreenEx()
+
+	vkWaitDeviceIdle()
+
+	when is_android {//? ANDROID ONLY
+		vulkanAndroidStart(&vkSurface)
+	}
+
+	//vkCleanSyncObject()
+	vkCleanSwapChain()
+
+	vkCreateSwapChainAndImageViews()
+	if vkExtent.width == 0 || vkExtent.height == 0 {
+		sync.mutex_unlock(&fullScreenMtx)
+		return
+	}
+	//vkCreateSyncObject()
+
+	vkSetFullScreenEx()
+
+	sizeUpdated = false
+
+	sync.mutex_unlock(&fullScreenMtx)
+
+	RenderCmd_RefreshAll()
+
+	Size()
+}
+vkCreateSurface :: vkRecreateSurface
+
+vkSetFullScreenEx :: proc() {
+	when ODIN_OS == .Windows {
+		if VK_EXT_full_screen_exclusive_support() && __isFullScreenEx {
+			Windows_ChangeFullScreen()
+			res := vk.AcquireFullScreenExclusiveModeEXT(vkDevice, vkSwapchain)
+			if res != .SUCCESS do panicLog("AcquireFullScreenExclusiveModeEXT : ", res)
+			vkReleasedFullScreenEx = false
+		}
+	}
+}
+
+vkReleaseFullScreenEx :: proc() {
+	when ODIN_OS == .Windows {
+		if VK_EXT_full_screen_exclusive_support() && !vkReleasedFullScreenEx {
+			res := vk.ReleaseFullScreenExclusiveModeEXT(vkDevice, vkSwapchain)
+			if res != .SUCCESS do panicLog("ReleaseFullScreenExclusiveModeEXT : ", res)
+			vkReleasedFullScreenEx = true
+		}
+	}
 }
 
 vkRecreateSurface :: proc() {
-	//TODO
+	when is_android {
+		//TODO LOAD FUNC
+		vulkanAndroidStart(&vkSurface)
+	} else {// !ismobile
+		glfwVulkanStart(&vkSurface)
+	}
 }
 
-vkRecordCommandBuffer :: proc() {
-	//TODO
+vkRecordCommandBuffer :: proc(cmd:^__RenderCmd, frame:uint) {
+	clsColor :vk.ClearValue = {color = {float32 = gClearColor}}
+	clsDepthStencil :vk.ClearValue = {depthStencil = {depth = 1.0, stencil = 0}}
+
+	for &c, i in cmd.cmds[frame] {
+		beginInfo := vk.CommandBufferBeginInfo {
+			sType = vk.StructureType.COMMAND_BUFFER_BEGIN_INFO,
+			flags = {},
+		}
+		res := vk.BeginCommandBuffer(c, &beginInfo)
+		if res != .SUCCESS do panicLog("BeginCommandBuffer : ", res)
+
+		renderPassBeginInfo := vk.RenderPassBeginInfo {
+			sType = vk.StructureType.RENDER_PASS_BEGIN_INFO,
+			renderPass = vkRenderPass,
+			framebuffer = vkFrameBuffers[i],
+			renderArea = {
+				offset = {x = 0, y = 0},
+				extent = vkExtent_rotation,
+			},
+			clearValueCount = 2,
+			pClearValues = &([]vk.ClearValue{clsColor, clsDepthStencil})[0],
+		}
+		vk.CmdBeginRenderPass(c, &renderPassBeginInfo, vk.SubpassContents.INLINE)
+		
+		viewport := vk.Viewport {
+			x = 0.0,
+			y = 0.0,
+			width = f32(vkExtent_rotation.width),
+			height = f32(vkExtent_rotation.height),
+			minDepth = 0.0,
+			maxDepth = 1.0,
+		}
+		vk.CmdSetViewport(c, 0, 1, &viewport)
+
+		scissor := vk.Rect2D {
+			offset = {x = 0, y = 0},
+			extent = vkExtent_rotation,
+		}
+		vk.CmdSetScissor(c, 0, 1, &scissor)
+
+		sync.rw_mutex_lock(&cmd.objLock)
+		objs := make_non_zeroed_slice([]^IObject, len(cmd.scene), context.temp_allocator)
+		copy_slice(objs, cmd.scene[:])
+		sync.rw_mutex_unlock(&cmd.objLock)
+		defer delete(objs, context.temp_allocator)
+		
+		for obj in objs {
+			IObject_Draw(obj, c)
+		}
+
+		vk.CmdEndRenderPass(c)
+		res = vk.EndCommandBuffer(c)
+		if res != .SUCCESS do panicLog("EndCommandBuffer : ", res)
+	}
 }
 
 vkDrawFrame :: proc() {
-	//TODO
+	@(static) frame:uint = 0
+
+	vkOpExecute(true)
+
+	if vkExtent.width <= 0 || vkExtent.height <= 0 || sizeUpdated {
+		vkRecreateSwapChain()
+		return
+	}
+
+	res := vk.WaitForFences(vkDevice, 1, &vkInFlightFence[frame], true, max(u64))
+	if res != .SUCCESS do panicLog("WaitForFences : ", res)
+
+
+	imageIndex: u32
+	res = vk.AcquireNextImageKHR(vkDevice, vkSwapchain, max(u64), vkImageAvailableSemaphore[frame], 0, &imageIndex)
+	if res == .ERROR_OUT_OF_DATE_KHR {
+		vkRecreateSwapChain()
+		return
+	} else if res == .ERROR_SURFACE_LOST_KHR {
+		vkRecreateSurface()
+		vkRecreateSwapChain()
+		return
+	} else if res != .SUCCESS { panicLog("AcquireNextImageKHR : ", res) }
+	
+	if gRenderCmd != nil && gMainRenderCmdIdx >= 0 {
+		sync.mutex_lock(&gRenderCmdMtx)
+		if gRenderCmd[gMainRenderCmdIdx].refresh[frame] {
+			gRenderCmd[gMainRenderCmdIdx].refresh[frame] = false
+			vkRecordCommandBuffer(gRenderCmd[gMainRenderCmdIdx], frame)
+		}
+		waitStages := vk.PipelineStageFlags{.COLOR_ATTACHMENT_OUTPUT}
+		submitInfo := vk.SubmitInfo {
+			sType = vk.StructureType.SUBMIT_INFO,
+			waitSemaphoreCount = 1,
+			pWaitSemaphores = &vkImageAvailableSemaphore[frame],
+			pWaitDstStageMask = &waitStages,
+			commandBufferCount = 1,
+			pCommandBuffers = &gRenderCmd[gMainRenderCmdIdx].cmds[frame][imageIndex],
+			signalSemaphoreCount = 1,
+			pSignalSemaphores = &vkRenderFinishedSemaphore[frame],
+		}
+
+		res = vk.ResetFences(vkDevice, 1, &vkInFlightFence[frame])
+		if res != .SUCCESS do panicLog("ResetFences : ", res)
+
+		res = vk.QueueSubmit(vkGraphicsQueue, 1, &submitInfo, vkInFlightFence[frame])
+		if res != .SUCCESS do panicLog("QueueSubmit : ", res)
+
+		sync.mutex_unlock(&gRenderCmdMtx)
+	} else {
+		sync.mutex_lock(&gRenderCmdMtx)
+		waitStages := vk.PipelineStageFlags{.COLOR_ATTACHMENT_OUTPUT}
+
+		clsColor :vk.ClearValue = {color = {float32 = gClearColor}}
+		clsDepthStencil :vk.ClearValue = {depthStencil = {depth = 1.0, stencil = 0}}
+
+		renderPassBeginInfo := vk.RenderPassBeginInfo {
+			sType = vk.StructureType.RENDER_PASS_BEGIN_INFO,
+			renderPass = vkRenderPass,
+			framebuffer = vkFrameBuffers[imageIndex],
+			renderArea = {
+				offset = {x = 0, y = 0},
+				extent = vkExtent_rotation,	
+			},
+			clearValueCount = 2,
+			pClearValues = &([]vk.ClearValue{clsColor, clsDepthStencil})[0],
+		}
+		vk.BeginCommandBuffer(vkCmdBuffer[frame], &vk.CommandBufferBeginInfo {
+			sType = vk.StructureType.COMMAND_BUFFER_BEGIN_INFO,
+			flags = {vk.CommandBufferUsageFlag.ONE_TIME_SUBMIT},
+		})
+		vk.CmdBeginRenderPass(vkCmdBuffer[frame], &renderPassBeginInfo, vk.SubpassContents.INLINE)
+		vk.CmdEndRenderPass(vkCmdBuffer[frame])
+		res = vk.EndCommandBuffer(vkCmdBuffer[frame])
+		if res != .SUCCESS do panicLog("EndCommandBuffer : ", res)
+
+		submitInfo := vk.SubmitInfo {
+			sType = vk.StructureType.SUBMIT_INFO,
+			waitSemaphoreCount = 1,
+			pWaitSemaphores = &vkImageAvailableSemaphore[frame],
+			pWaitDstStageMask = &waitStages,
+			commandBufferCount = 1,
+			pCommandBuffers = &vkCmdBuffer[frame],
+			signalSemaphoreCount = 1,
+			pSignalSemaphores = &vkRenderFinishedSemaphore[frame],
+		}
+
+		res = vk.ResetFences(vkDevice, 1, &vkInFlightFence[frame])
+		if res != .SUCCESS do panicLog("ResetFences : ", res)
+
+		res = vk.QueueSubmit(vkGraphicsQueue, 1, &submitInfo, 	vkInFlightFence[frame])
+		if res != .SUCCESS do panicLog("QueueSubmit : ", res)
+
+		sync.mutex_unlock(&gRenderCmdMtx)
+	}
+
+	//vkWaitAllocatorCmdFence()
+	// if frame == MAX_FRAMES_IN_FLIGHT - 1 {
+	// 	vkOpExecuteDestroy()
+	// }
+
+	presentInfo := vk.PresentInfoKHR {
+		sType = vk.StructureType.PRESENT_INFO_KHR,
+		waitSemaphoreCount = 1,
+		pWaitSemaphores = &vkRenderFinishedSemaphore[frame],
+		swapchainCount = 1,
+		pSwapchains = &vkSwapchain,
+		pImageIndices = &imageIndex,
+	}
+
+	res = vk.QueuePresentKHR(vkPresentQueue, &presentInfo)
+
+	if res == .ERROR_OUT_OF_DATE_KHR {
+		vkRecreateSwapChain()
+		return
+	} else if res == .SUBOPTIMAL_KHR {
+		prop : vk.SurfaceCapabilitiesKHR
+		res = 	vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(vkPhysicalDevice, vkSurface, &prop)
+		if res != .SUCCESS do panicLog("GetPhysicalDeviceSurfaceCapabilitiesKHR : ", res)
+		if prop.currentExtent.width != vkExtent.width || prop.currentExtent.height != vkExtent.height {
+			vkRecreateSwapChain()
+			return
+		}
+	} else if res == .ERROR_SURFACE_LOST_KHR {
+		vkRecreateSurface()
+		vkRecreateSwapChain()
+		return
+	} else if res != .SUCCESS { panicLog("QueuePresentKHR : ", res) }
+
+	frame = (frame + 1) % MAX_FRAMES_IN_FLIGHT
 }
 
 vkRefreshPreMatrix :: proc() {
-	//TODO
+	if is_mobile {
+		orientation := __screenOrientation//TODO CHECK
+		if orientation == .Landscape90 {
+			vkRotationMatrix = linalg.matrix4_rotate_f32(linalg.to_radians(f32(90.0)), {0, 0, 1})
+		} else if orientation == .Landscape270 {
+			vkRotationMatrix = linalg.matrix4_rotate_f32(linalg.to_radians(f32(270.0)), {0, 0, 1})
+		} else if orientation == .Vertical180 {
+			vkRotationMatrix = linalg.matrix4_rotate_f32(linalg.to_radians(f32(180.0)), {0, 0, 1})
+		} else if orientation == .Vertical360 {
+			vkRotationMatrix = linalg.identity_matrix(Matrix)
+		} else {
+			vkRotationMatrix = linalg.identity_matrix(Matrix)
+		}
+	}
 }
 
 vkCreateSyncObject :: proc() {
-	//TODO
+	for i in 0..<MAX_FRAMES_IN_FLIGHT {
+		vk.CreateSemaphore(vkDevice, &vk.SemaphoreCreateInfo{
+			sType = vk.StructureType.SEMAPHORE_CREATE_INFO,
+		}, nil, &vkImageAvailableSemaphore[i])
+		vk.CreateSemaphore(vkDevice, &vk.SemaphoreCreateInfo{
+			sType = vk.StructureType.SEMAPHORE_CREATE_INFO,
+		}, nil, &vkRenderFinishedSemaphore[i])
+		vk.CreateFence(vkDevice, &vk.FenceCreateInfo{
+			sType = vk.StructureType.FENCE_CREATE_INFO,
+			flags = {vk.FenceCreateFlag.SIGNALED},
+		}, nil, &vkInFlightFence[i])
+	}
 }
 
-vkCleanUpSyncObject :: proc() {
-	//TODO
+vkCleanSyncObject :: proc() {
+	for i in 0..<MAX_FRAMES_IN_FLIGHT {
+		vk.DestroySemaphore(vkDevice, vkImageAvailableSemaphore[i], nil)
+		vk.DestroySemaphore(vkDevice, vkRenderFinishedSemaphore[i], nil)
+		vk.DestroyFence(vkDevice, vkInFlightFence[i], nil)
+	}
+}
+
+vkCleanSwapChain :: proc() {
+	if vkSwapchain != 0 {
+		for _, i in vkFrameBuffers {
+			vk.DestroyFramebuffer(vkDevice, vkFrameBuffers[i], nil)
+			//vk.DestroyFramebuffer(vkDevice, vkClearFrameBuffers[i], nil)
+			vk.DestroyImageView(vkDevice, vkFrameBufferImageViews[i], nil)
+		}
+
+		Texture_Deinit(&vkFrameDepthStencilTexture)
+		vkOpExecute(true)
+
+		delete(vkFrameBuffers)
+		//delete(vkClearFrameBuffers)
+		delete(vkFrameBufferImageViews)
+
+		vk.DestroySwapchainKHR(vkDevice, vkSwapchain, nil)
+		vkSwapchain = 0
+	}
 }

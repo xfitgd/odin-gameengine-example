@@ -172,9 +172,11 @@ vkDefaultPipelineDepthStencilStateCreateInfo := vkPipelineDepthStencilStateCreat
 	flags: vk.PipelineInputAssemblyStateCreateFlags = {},
 ) -> vk.PipelineInputAssemblyStateCreateInfo {
 	return {
-		sType = vk.StructureType.GRAPHICS_PIPELINE_CREATE_INFO,
+		sType = vk.StructureType.PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
 		pNext = pNext,
 		flags = flags,
+		topology = topology,
+		primitiveRestartEnable = primitiveRestartEnable,
 	}
 }
 
@@ -184,7 +186,7 @@ vkDefaultPipelineDepthStencilStateCreateInfo := vkPipelineDepthStencilStateCreat
 	scissorCount:  u32 = 1,
 	pScissors:     [^]vk.Rect2D = nil,
 	flags:         vk.PipelineViewportStateCreateFlags = {},
-	pNext:         rawptr,
+	pNext:         rawptr = nil,
 ) -> vk.PipelineViewportStateCreateInfo {
 	return {
 		sType = vk.StructureType.PIPELINE_VIEWPORT_STATE_CREATE_INFO,

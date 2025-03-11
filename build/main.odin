@@ -84,13 +84,13 @@ main :: proc() {
 
 		p: os2.Process
 		p, err = os2.process_start(os2.Process_Desc{
-			command = {"/usr/local/odin/odin", "build", 
+			command = {"/home/seongjun/odin-lang/odin", "build", 
 			setting["main-package-path"].(json.String), 
 			"-no-bounds-check" if !debug else ({}),
 			out_path, 
 			o, 
 			"-debug" if debug else ({}),
-			"-sanitize:address" if debug else ({}),
+			//"-sanitize:address" if debug else ({}),
 			({}) if !is_android else "-define:__ANDROID__=true"},
 			stdout  = w,
 			stderr  = w,

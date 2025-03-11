@@ -43,11 +43,12 @@ RectU :: Rect_(u32)
 RectF :: Rect_(f32)
 
 PointF ::  linalg.Vector2f32
+Point3DF :: linalg.Vector3f32
 Point3DwF :: linalg.Vector4f32
 PointI :: [2]i32
 PointU :: [2]u32
 PointF64 :: [2]f64
-Matrix :: linalg.Matrix4x4f32
+Matrix :: matrix[4, 4]f32
 
 
 //! 현재 매개변수에 배열 이외의 값 (숫자) 을 넣어도 작동되는 버그 있음.
@@ -153,6 +154,17 @@ splat_4 :: proc "contextless" (scalar:$T) -> [4]T where intrinsics.type_is_numer
 	return { 0..<4 = scalar }
 }
 
+epsilon :: proc "contextless" ($T:typeid) -> T where intrinsics.type_is_float(T) {
+	if T == f16 || T == f16be || T == f16le do return T(math.F16_EPSILON)
+	if T == f32 || T == f32be || T == f32le do return T(math.F32_EPSILON)
+	return T(math.F64_EPSILON)
+}
+
+epsilonEqual :: proc "contextless" (a:$T, b:T) -> bool where intrinsics.type_is_float(T) {
+	return math.abs(a - b) < epsilon(T)
+}
+
+
 
 // Algorithm from http://www.blackpawn.com/texts/pointinpoly/default.html
 PointInTriangle :: proc "contextless" (p : [2]$T, a : [2]T, b : [2]T, c : [2]T) -> bool where intrinsics.type_is_float(T){
@@ -255,8 +267,6 @@ LinesIntersect :: proc(a1 : [2]$T, a2 : [2]T, b1: [2]T, b2 : [2]T) -> (bool, [2]
 	aba := linalg.vector_cross2(a, b)
 	if aba == 0 do return false, {}
 
-	
-
 	A := linalg.vector_cross2(b, ab) / aba
 	B := linalg.vector_cross2(a, ab) / aba
 	if A <= 1 && B <= 1 && A >= 0 && B >= 0 {
@@ -299,7 +309,7 @@ LineExtendPoint :: proc "contextless" (prev:[2]$T, cur:[2]T, next:[2]T, thicknes
 	npnX := vpn.y * ccw_
 	npnY := vpn.x * ccw_
 
-	bis := [2]T{(nnnX + npnY) * ccw, (nnnY + npnX) * ccw}
+	bis := [2]T{(nnnX + npnY) * ccw_, (nnnY + npnX) * ccw_}
 	bisn : [2]T = linalg.normalize(bis)
 	bislen := thickness / intrinsics.sqrt((1 + nnnX * npnX + nnnY * npnY) / 2)
 

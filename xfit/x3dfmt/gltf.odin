@@ -1,5 +1,5 @@
 package xvectorfmt
 
-import "vendor:cgltf"
+//import "vendor:cgltf"
 
 //TODO use cgltf
