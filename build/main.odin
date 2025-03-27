@@ -84,7 +84,7 @@ main :: proc() {
 
 		p: os2.Process
 		p, err = os2.process_start(os2.Process_Desc{
-			command = {"/home/seongjun/odin-lang/odin", "build", 
+			command = {"odin", "build", 
 			setting["main-package-path"].(json.String), 
 			"-no-bounds-check" if !debug else ({}),
 			out_path, 

@@ -114,7 +114,7 @@ Font_ConvertFontFmtToVFF :: proc(_fontFmtData:[]byte, _fontFmtFaceIdx:uint) -> (
         data.polygon.poly[data.idx] = data.pen
         data.polygon.poly[data.idx+1] = ctl0
         data.polygon.poly[data.idx+2] = ctl1
-        data.polygon.types[data.typeIdx] = .Unkown
+        data.polygon.types[data.typeIdx] = .Unknown
         data.pen = end
         data.idx += 3
         data.nPolyLen += 3
@@ -181,6 +181,18 @@ Font_ConvertFontFmtToVFF :: proc(_fontFmtData:[]byte, _fontFmtFaceIdx:uint) -> (
     for charCode != 0 {
         err = freetype.load_glyph(face, gIdx, {.No_Bitmap})
         if err != .Ok do panicLog(err)
+
+        if face.glyph.outline.n_points == 0 {
+            non_zero_resize_dynamic_array(&outData, len(outData) + size_of(CharNode))
+            (transmute([^]CharNode)(&outData[len(outData) - size_of(CharNode)]))[0] = CharNode{
+                size = 0,
+                char = auto_cast charCode,
+                advanceX = f32(face.glyph.advance.x) / (64.0 * SCALE_DEFAULT)
+            }
+            charCode = freetype.get_next_char(face, charCode, &gIdx)
+            charLen += 1
+            continue
+        }
     
         if freetype.outline_get_orientation(&face.glyph.outline) == freetype.Orientation.FILL_RIGHT {
             freetype.outline_reverse(&face.glyph.outline)
@@ -221,7 +233,9 @@ Font_ConvertFontFmtToVFF :: proc(_fontFmtData:[]byte, _fontFmtFaceIdx:uint) -> (
                 char = auto_cast charCode,
                 advanceX = f32(face.glyph.advance.x) / (64.0 * SCALE_DEFAULT)
             }
-            continue;
+            charCode = freetype.get_next_char(face, charCode, &gIdx)
+            charLen += 1
+            continue
         } else {
             poly.nPolys[data.nPoly] = data.nPolyLen
             data.nPoly += 1
@@ -231,7 +245,7 @@ Font_ConvertFontFmtToVFF :: proc(_fontFmtData:[]byte, _fontFmtFaceIdx:uint) -> (
             poly.nPolys = resize_non_zeroed_slice(poly.nPolys, data.nPoly, context.temp_allocator)
             poly.nTypes = resize_non_zeroed_slice(poly.nTypes, data.nTypes, context.temp_allocator)
             poly.types = resize_non_zeroed_slice(poly.types, data.typeIdx, context.temp_allocator)
-            poly.colors = make_non_zeroed([]Maybe(Point3DwF), data.nPoly, context.temp_allocator)
+            poly.colors = make_non_zeroed([]Maybe(Point3DwF), data.idx, context.temp_allocator)
             for &c in poly.colors {
                 c = Point3DwF{0,0,0,1}//?no matter
             }

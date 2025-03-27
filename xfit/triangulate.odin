@@ -809,14 +809,27 @@ import "base:intrinsics"
     return true
 }
 
-TrianguateSinglePolygon :: proc(poly:[]PointF, allocator := context.allocator) -> (indices:[]u32) {
+TrianguateSinglePolygon :: proc(poly:[]PointF, holes:[][]PointF = nil, allocator := context.allocator) -> (indices:[]u32) {
     ctx := TriangleCtx{allocator = allocator}
-    ctx.ptsData = make_non_zeroed_slice([]PointE, len(poly), context.temp_allocator)
-    ctx.pts = make_non_zeroed_slice([]^PointE, len(poly), context.temp_allocator)
+   
+    if holes == nil {
+        ctx.pts = make_non_zeroed_slice([]^PointE, len(poly), context.temp_allocator)
+        ctx.ptsData = make_non_zeroed_slice([]PointE, len(poly), context.temp_allocator)
+        ctx.edges = make_non_zeroed_slice([]Edge, len(poly), context.temp_allocator)
+        ctx.nodes = make_non_zeroed_slice([]Node, len(poly) - 1, context.temp_allocator)
+    } else {
+        holeLen := 0
+        for hole in holes {
+            holeLen += len(hole)
+        }
+        ctx.pts = make_non_zeroed_slice([]^PointE, len(poly) + holeLen, context.temp_allocator)
+        ctx.ptsData = make_non_zeroed_slice([]PointE, len(poly) + holeLen, context.temp_allocator)
+        ctx.edges = make_non_zeroed_slice([]Edge, len(poly) + holeLen, context.temp_allocator)
+        ctx.nodes = make_non_zeroed_slice([]Node, len(poly) + holeLen - 1, context.temp_allocator)
+    }
     ctx.indices = make_non_zeroed_dynamic_array([dynamic]u32, allocator)
     ctx.maps = make_non_zeroed_dynamic_array([dynamic]^Triangle, context.temp_allocator)
-    ctx.edges = make_non_zeroed_slice([]Edge, len(poly), context.temp_allocator)
-    ctx.nodes = make_non_zeroed_slice([]Node, len(poly) - 1, context.temp_allocator)
+  
     ctx.allocator = allocator
 
     defer {
@@ -838,9 +851,26 @@ TrianguateSinglePolygon :: proc(poly:[]PointF, allocator := context.allocator) -
         ctx.pts[i] = &ctx.ptsData[i]
     }
 
-    for p, i in ctx.pts {
+    for _, i in poly {
         j := i < len(poly) - 1 ? i + 1 : 0
         Edge_Init(ctx.pts[i], ctx.pts[j], &ctx.edges[i])
+    }
+
+    if holes != nil {
+        idx := len(poly)
+        for hole in holes {
+            for p, i in hole {
+                ctx.ptsData[idx + i] = PointE_Init(p, u32(idx + i), context.temp_allocator)
+                ctx.pts[idx + i] = &ctx.ptsData[idx + i]
+            }
+        
+            for _, i in hole {
+                j := i < len(hole) - 1 ? i + 1 : 0
+                Edge_Init(ctx.pts[i + idx], ctx.pts[j + idx], &ctx.edges[i + idx])
+            }
+
+            idx += len(hole)
+        }
     }
 
     ctx.xmax = ctx.pts[0].x
@@ -945,7 +975,7 @@ TrianguateSinglePolygon :: proc(poly:[]PointF, allocator := context.allocator) -
 
                 for i in 0..<3 {
                     if !tt.constrainedEdge[i] {
-                        non_zero_append(&tris, tri.neighbors[i])
+                        non_zero_append(&tris, tt.neighbors[i])
                     }
                 }
             }
@@ -1151,17 +1181,58 @@ TrianguatePolygons :: proc(poly:[]PointF,  nPoly:[]u32, allocator := context.all
     indices_ := make_non_zeroed_dynamic_array([dynamic]u32, allocator)
     
     idx :u32 = 0
-    for n in nPoly {
-        indicesT := TrianguateSinglePolygon(poly[idx:idx+n], allocator)
-        defer delete(indicesT, allocator)
+    for n:u32 = 0;n < u32(len(nPoly));n += 1 {
+        isHole := GetPolygonOrientation( poly[idx:idx+nPoly[n]]) == .Clockwise
+
+        if !isHole {
+            holes := make_non_zeroed_dynamic_array([dynamic][]PointF, context.temp_allocator )
+            holeIndices := make_non_zeroed_dynamic_array([dynamic]u32, context.temp_allocator )
+            defer delete(holes)
+            defer delete(holeIndices)
+
+            idx2 :u32 = 0
+            for n2:u32 = 0;n2 < u32(len(nPoly));n2 += 1 {
+                if n != n2 {
+                    isHole = GetPolygonOrientation( poly[idx2:idx2+nPoly[n2]]) == .Clockwise
+                    if isHole {
+                        if PointInPolygon(poly[idx2], poly[idx:idx+nPoly[n]]) {
+                            non_zero_append(&holes, poly[idx2:idx2+nPoly[n2]])
+                            non_zero_append(&holeIndices, idx2)
+                            
+                        }
+                    }
+                }
+                idx2 += nPoly[n2]
+            }
+
+            if len(holes) == 0 {
+                indicesT := TrianguateSinglePolygon(poly[idx:idx+nPoly[n]], nil, allocator)
+                defer delete(indicesT, allocator)
+              
+                for &id in indicesT {
+                    id += idx
+                }
         
-        for &id in indicesT {
-            id += idx
+                non_zero_append(&indices_, ..indicesT)
+            } else {
+                indicesT := TrianguateSinglePolygon(poly[idx:idx+nPoly[n]], holes[:], allocator)
+                defer delete(indicesT, allocator)
+              
+                indx :u32 = 0
+                for ;indx < nPoly[n];indx += 1 {
+                    indicesT[indx] += idx
+                }
+                for _, i in holeIndices {
+                    for _,_ in holes[i] {
+                        indicesT[indx] += holeIndices[i]
+                        indx += 1
+                    }
+                }
+                non_zero_append(&indices_, ..indicesT)
+            }
         }
 
-        non_zero_append(&indices_, ..indicesT)
-
-        idx += n
+        idx += nPoly[n]
     }
 
     shrink(&indices_)

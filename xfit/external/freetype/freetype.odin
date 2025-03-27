@@ -9,7 +9,19 @@ when FREETYPE_SHARED {
 }
 
 LIB :: xlibrary.EXTERNAL_LIBPATH + "/freetype/libfreetype" + xlibrary.ARCH_end
-foreign import freetype { LIB }
+BROTLI_COMMON_LIB :: xlibrary.EXTERNAL_LIBPATH + "/brotli/libbrotlicommon" + xlibrary.ARCH_end
+BROTLI_DEC_LIB :: xlibrary.EXTERNAL_LIBPATH + "/brotli/libbrotlidec" + xlibrary.ARCH_end
+BROTLI_ENC_LIB :: xlibrary.EXTERNAL_LIBPATH + "/brotli/libbrotlienc" + xlibrary.ARCH_end
+BZIP2_LIB :: xlibrary.EXTERNAL_LIBPATH + "/bzip2/libbz2" + xlibrary.ARCH_end
+ZLIB :: "system:z"
+foreign import freetype {
+    LIB,
+    BROTLI_DEC_LIB,
+    BROTLI_ENC_LIB,
+    BROTLI_COMMON_LIB,
+    BZIP2_LIB,
+    ZLIB,
+}
 
 Library       :: distinct rawptr
 

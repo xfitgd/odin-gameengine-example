@@ -4,6 +4,7 @@ package xfit
 
 import "core:math"
 import "core:slice"
+import "core:fmt"
 import "core:math/linalg"
 import "base:runtime"
 import "base:intrinsics"
@@ -15,11 +16,10 @@ RawShape :: struct {
 
 CurveType :: enum {
     Line,
-    Unkown,
+    Unknown,
     Serpentine,
     Loop,
-    Cusp_Inf,
-    Cusp_Inflection_Inf,
+    Cusp,
     Quadratic,
 }
 
@@ -138,53 +138,44 @@ RawShape_CloneFromBytes :: proc (_in :[]byte, allocator := context.allocator) ->
 }
 
 
-GetCubicCurveType :: proc "contextless" (_start:[2]$T, _control0:[2]T, _control1:[2]T, _end:[2]T) -> (type:CurveType = .Unkown, err:ShapesError = .None, outD:[3]T) where intrinsics.type_is_float(T) {
+GetCubicCurveType :: proc "contextless" (_start:[2]$T, _control0:[2]T, _control1:[2]T, _end:[2]T) ->
+(type:CurveType = .Unknown, err:ShapesError = .None, outD:[3]T) where intrinsics.type_is_float(T) {
+
     if _start == _control0 && _control0 == _control1 && _control1 == _end {
         err = .IsPointNotLine
         return
     }
 
-    c1 := -3 * _start + 3 * _control0
-    c2 := 3 * _start - 6 * _control0 + 3 * _control1
-    c3 := -3 * _start + 3 * _control0 - 3 * _control1 + _end
+    cross_1 := [3]T{_end.y - _control1.y,       _control1.x - _end.x,       _end.x * _control1.y - _end.y * _control1.x}
+    cross_2 := [3]T{_start.y - _end.y,          _end.x - _start.x,          _start.x * _end.y - _start.y * _end.x}
+    cross_3 := [3]T{_control0.y - _start.y,     _start.x - _control0.x,     _control0.x * _start.y - _control0.y * _start.x}
 
-    outD[0] = linalg.matrix2_determinant(
-        matrix[2, 2]T{
-            c3.x, c3.y,
-            c2.x, c2.y,
-        }
-    )
-    outD[1] = linalg.matrix2_determinant(
-        matrix[2, 2]T{
-            c3.x, c3.y,
-            c1.x, c1.y,
-        }
-    )
-    outD[2] = linalg.matrix2_determinant(
-        matrix[2, 2]T{
-            c2.x, c2.y,
-            c1.x, c1.y,
-        }
-    )
-    outD = linalg.normalize(outD)
+    a1 := _start.x * cross_1.x      + _start.y * cross_1.y      + cross_1.z
+    a2 := _control0.x * cross_2.x   + _control0.y * cross_2.y   + cross_2.z
+    a3 := _control1.x * cross_3.x   + _control1.y * cross_3.y   + cross_3.z
+
+    outD[0] = a1 - 2 * a2 + 3 * a3
+    outD[1] = -a2 + 3 * a3
+    outD[2] = 3 * a3
 
     D := 3 * outD[1] * outD[1] - 4 * outD[2] * outD[0]
+    discr := outD[0] * outD[0] * D
 
-    if outD[0] > epsilon(T) {
-        discr := outD[0] * outD[0] * D
-
-        if discr > epsilon(T) {
-            type = .Serpentine
-        } else if discr < -epsilon(T) {
-            type = .Loop
+    if discr > epsilon(T) {
+        type = .Serpentine
+    } else if discr < -epsilon(T) {
+        type = .Loop
+    } else if abs(discr) <= epsilon(T) {
+        if abs(outD[0]) <= epsilon(T) && abs(outD[1]) <= epsilon(T) {
+            if abs(outD[2]) <= epsilon(T) {
+                type = .Line
+            }
+            type = .Quadratic
+        } else {
+            type = .Cusp
         }
-        type = .Cusp_Inflection_Inf
-    } else if outD[1] > epsilon(T) {
-        type = .Cusp_Inf
-    } else if outD[2] > epsilon(T) {
-        type = .Quadratic
     } else {
-        type = .Line
+        type = .Loop
     }
     return
 }
@@ -220,155 +211,216 @@ LineSplitLine :: proc "contextless" (pts:[2][$N]$T, t:T) -> (outPts1:[2][N]T, ou
     return
 }
 
-@(private="file") _Shapes_ComputeLine :: proc(vertList:^[dynamic]ShapeVertex2D, indList:^[dynamic]u32, pts:[]PointF, type:CurveType, color:Point3DwF) -> ShapesError {
+@(private="file") _Shapes_ComputeLine :: proc(
+    poly:^[dynamic]PointF,
+    vertList:^[dynamic]ShapeVertex2D,
+    indList:^[dynamic]u32,
+    pts:[]PointF,
+    type:CurveType,
+    color:Point3DwF,
+    _reverse := false,
+    _subdiv :f32 = 0.0,
+    _repeat := false) -> ShapesError {
+
+    if _subdiv < 0 do panicLog("_subdiv can't negative.")
+
     curveType := type
     err:ShapesError = .None
 
-    F2 : matrix[4,4]f32
     pts2 : [4][2]f32
     pts_:[4][2]f32
     intrinsics.mem_copy_non_overlapping(&pts_[0], &pts[0], len(pts) * size_of(PointF))
 
     reverse := false
-    segmentCreated := false
     outD:[3]f32 = {0, 0, 0}
     if curveType != .Line && curveType != .Quadratic {
         curveType, err, outD = GetCubicCurveType(pts[0], pts[1], pts[2], pts[3])
         if err != .None do return err
+    } else if curveType == .Quadratic && _subdiv == 0.0 {
+        non_zero_append(poly, pts[0])
+
+        if PointLineLeftOrRight(pts[1], pts[0], pts[2]) > 0 {
+            non_zero_append(poly, pts[1])
+        }
+
+        vlen :u32 = u32(len(vertList))
+        non_zero_append(vertList, ShapeVertex2D{
+            uvw = {0,0,0},
+            color = color,
+            pos = pts[0],
+        })
+        non_zero_append(vertList, ShapeVertex2D{
+            uvw = {-0.5,0,0.5},
+            color = color,
+            pos = pts[1],
+        })
+        non_zero_append(vertList, ShapeVertex2D{
+            uvw = {-1,-1,1},
+            color = color,
+            pos = pts[2],
+        })
+        if _reverse {
+            vertList[vlen].uvw.x *= -1
+            vertList[vlen + 1].uvw.x *= -1
+            vertList[vlen + 2].uvw.x *= -1
+
+            vertList[vlen].uvw.y *= -1
+            vertList[vlen + 1].uvw.y *= -1
+            vertList[vlen + 2].uvw.y *= -1
+        }
+
+        non_zero_append(indList, vlen, vlen + 1, vlen + 2)
+       
+        return .None
     }
 
-    k_INVERSE_M :matrix[4,4]f32 = {
-        1, 0, 0, 0,
-        1, 1.0/3.0, 0, 0,
-        1, 2.0/3.0, 1.0/3.0, 0,
-        1, 1, 1, 1,
-    }
     F :matrix[4,4]f32
-
-    solveQuadratic :: proc "contextless" (a:$T, b:T, c:T) -> (T,T) where intrinsics.type_is_float(T) {
-        if a == 0 do panicLog("solveQuadratic: a == 0")
-
-        if b != 0 {
-            b_ := b * 0.5
-            q := -(b_ + (b_ < 0 ? -1 : 1) * math.sqrt(abs(b_ * b_ - a * c)))
-            return q / a, c / q
-        } else {
-            n := math.sqrt(abs(a * c))
-            return -n / a, n / a
-        }
-    }
-
-    loopNeedReverse :: #force_inline proc "contextless" (d1:$T, k1:T) -> bool where intrinsics.type_is_float(T) {
-        return (d1 > epsilon(T) && k1 < -epsilon(T)) || (d1 < -epsilon(T) && k1 > epsilon(T))
-    }
-
-    splitSegment :: proc "contextless" (pts:[4][2]$T, F:matrix[4,4]T, t:T) -> (outPts1:[4][2]T, outPts2:[4][2]T, outF1:matrix[4,4]T, outF2:matrix[4,4]T) where intrinsics.type_is_float(T) {
-        if !(0 < t && t < 1) do panicLog("splitSegment: t is not in [0, 1]")
-
-        //TODO split Quadratic and Line
-
-        outPts1, outPts2 = LineSplitCubic(pts, t)
-        Fs : [4][3]T = {
-            {F[0, 0], F[0, 1], F[0, 2]},
-            {F[1, 0], F[1, 1], F[1, 2]},
-            {F[2, 0], F[2, 1], F[2, 2]},
-            {F[3, 0], F[3, 1], F[3, 2]},
-        }
-        oF1, oF2 := LineSplitCubic(Fs, t)
-        outF1 = {
-            oF1[0][0], oF1[0][1], oF1[0][2], 0,
-            oF1[1][0], oF1[1][1], oF1[1][2], 0,
-            oF1[2][0], oF1[2][1], oF1[2][2], 0,
-            oF1[3][0], oF1[3][1], oF1[3][2], 1,
-        }
-        outF2 = {
-            oF2[0][0], oF2[0][1], oF2[0][2], 0,
-            oF2[1][0], oF2[1][1], oF2[1][2], 0,
-            oF2[2][0], oF2[2][1], oF2[2][2], 0,
-            oF2[3][0], oF2[3][1], oF2[3][2], 1,
-        }
-        return
-    }
 
     reverseOrientation :: #force_inline proc "contextless" (F:matrix[4,4]f32) -> matrix[4,4]f32 {
         return {
-            -F[0][0], -F[0][1], -F[0][2], F[0][3],
-            -F[1][0], -F[1][1], -F[1][2], F[1][3],
-            -F[2][0], -F[2][1], -F[2][2], F[2][3],
-            -F[3][0], -F[3][1], -F[3][2], F[3][3],
+            -F[0,0], -F[0,1], F[0,2], F[0,3],
+            -F[1,0], -F[1,1], F[1,2], F[1,3],
+            -F[2,0], -F[2,1], F[2,2], F[2,3],
+            -F[3,0], -F[3,1], F[3,2], F[3,3],
         }
     }
+    repeat := false
+    subdiv :f32 = 0.0
 
-    switch curveType {
-        case .Line:
-            return .None
-        case .Quadratic:
-            F = {
-                1, 0,   0,   0,
-                1, 1.0/3.0, 0,   0,
-                1, 2.0/3.0, 1.0/3.0, 0,
-                1, 1,   1,   1,
-            }
-            reverse = outD[2] < -epsilon(f32)
-        case .Serpentine:
-        case .Cusp_Inflection_Inf:
-            tl, tm : f32 = solveQuadratic(-3.0 * outD[0], 3.0 * outD[1], -outD[2])
-            l :[2]f32 = {tl, 1}
-            m :[2]f32 = {tm, 1}
-            l = linalg.normalize(l)
-            m = linalg.normalize(m)
-            F = {
-                l.x * m.x,                  l.x * l.x * m.x,        l.x * m.x * m.x,        0,
-                -m.y * l.x - l.y * m.x,     -3.0 * l.y * l.x * l.x,   -3.0 * m.y * m.x * m.x,   0,
-                l.y * m.y,                  3.0 * l.y * l.y * l.x,    3.0 * m.y * m.y * m.x,    0,
-                0,                          -l.y * l.y * l.y,       -m.y * m.y * m.y,       1,
-            }
-            F *= k_INVERSE_M
-            reverse = outD[0] < -epsilon(f32)
-        case .Loop:
-            td, te : f32 = solveQuadratic(-outD[0] * outD[0], outD[0] * outD[1], outD[2] * outD[0] - outD[1] * outD[1])
-            l :[2]f32 = {td, 1}
-            m :[2]f32 = {te, 1}
-            l = linalg.normalize(l)
-            m = linalg.normalize(m)
-            F = {
-                l.x * m.x,                  l.x * l.x * m.x,                            l.x * m.x * m.x,                            0,
-                -m.y * l.x - m.x * l.y,     -m.y * l.x * l.x - 2.0 * l.y * m.x * l.x,     -l.y * m.x * m.x - 2.0 * m.y * l.x * m.x,     0,
-                l.y * m.y,                  m.x * l.y * l.y + 2.0 * m.y * l.x * l.y,      l.x * m.y * m.y + 2.0 * l.y * m.x * m.y,      0,
-                0,                          -l.y * l.y * m.y,                           -l.y * m.y * m.y,                           1,
-            }
-            F *= k_INVERSE_M
-            l.x /= l.y
-            m.x /= m.y
-           
-            if l.x > epsilon(f32) && l.x < 1 - epsilon(f32) {   
-                pts_, pts2, F, F2 = splitSegment(pts_, F, l.x)
-                segmentCreated = true
-            } else if m.x > epsilon(f32) && m.x < 1 - epsilon(f32) {
-                pts_, pts2, F, F2 = splitSegment(pts_, F, m.x)
-                segmentCreated = true
-            }
-            reverse = loopNeedReverse(outD[0], F[0, 1])
-            if segmentCreated && loopNeedReverse(outD[0], F2[0, 1]) {
-                F2 = reverseOrientation(F2)
-            }
-        case .Cusp_Inf:
-            l :PointF = linalg.normalize(PointF{outD[2],3 * outD[1]})
-            F = {
-                l.x,    l.x * l.x * l.x,        1,  0,
-                -l.y,   -3.0 * l.y * l.x * l.x,   0,  0,
-                0,      3.0 * l.y * l.y * l.x,    0,  0,
-                0,      -l.y * l.y * l.y,       0,  1,
-            }
-            reverse = outD[2] < -epsilon(f32)
-        case .Unkown:
-            panicLog("GetCubicCurveType: unknown curve type")
+    if _subdiv == 0.0 {
+        switch curveType {
+            case .Line:
+                non_zero_append(poly, pts[0])
+                return .None
+            case .Quadratic:
+                F = {
+                    0,              0,              0,          0,
+                    -1.0/3.0,       0,              1.0/3.0,    0,
+                    -2.0/3.0,       -1.0/3.0,       2.0/3.0,    0,
+                    -1,             -1,             1,          1,
+                }
+            case .Serpentine:
+                t1 := math.sqrt_f32(9.0 * outD[1] * outD[1] - 12 * outD[0] * outD[2])
+                ls := 3.0 * outD[1] - t1
+                lt := 6.0 * outD[0]
+                ms := 3.0 * outD[1] + t1
+                mt := lt
+                ltMinusLs := lt - ls
+                mtMinusMs := mt - ms
+    
+                F = {
+                    ls * ms,                                                            ls * ls * ls,                           ms * ms * ms,           0,
+                    (1.0 / 3.0) * (3.0 * ls * ms - ls * mt - lt * ms),                  ls * ls * (ls - lt),                    ms * ms * (ms - mt),    0,
+                    (1.0 / 3.0) * (lt * (mt - 2.0 * ms) + ls * (3.0 * ms - 2.0 * mt)),  ltMinusLs * ltMinusLs * ls,             mtMinusMs * mtMinusMs * ms,             0,
+                    ltMinusLs * mtMinusMs,                                              -(ltMinusLs * ltMinusLs * ltMinusLs),   -(mtMinusMs * mtMinusMs * mtMinusMs),   1,
+                }
+    
+                if F[0,0] > 0.0 do reverse = true
+            case .Loop:
+                t1 := math.sqrt_f32(4 * outD[0] * outD[2] - 3 * outD[1] * outD[1])
+                ls := outD[1] - t1
+                lt := 2 * outD[0]
+                ms := outD[1] + t1
+                mt := lt
+    
+                ql := ls / lt
+                qm := ms / mt
+               
+                if !_repeat && 0.0 < ql && ql < 1.0 {
+                    repeat = true
+                    subdiv = ql
+                } else if !_repeat && 0.0 < qm && qm < 1.0 {
+                    repeat = true
+                    subdiv = qm
+                } else {
+                    ltMinusLs := lt - ls
+                    mtMinusMs := mt - ms
+    
+                    F = {
+                        ls * ms,                                                            ls * ls * ms,                           ls * ms * ms,           0,
+                        (1.0/3.0) * (-ls * mt - lt * ms + 3.0 * ls * ms),
+                        -(1.0 / 3.0) * ls * (ls * (mt - 3.0 * ms) + 2.0 * lt * ms),
+                        -(1.0 / 3.0) * ms * (ls * (2.0 * mt - 3.0 * ms) + lt * ms),    0,
+                        (1.0/3.0) * (lt * (mt - 2.0 * ms) + ls * (3.0 * ms - 2.0 * mt)),
+                        (1.0/3.0) * ltMinusLs * (ls * (2.0 * mt - 3.0 * ms) + lt * ms),
+                        (1.0/3.0) * mtMinusMs * (ls * (mt - 3.0 * ms) + 2.0 * lt * ms),   0,
+                        ltMinusLs * mtMinusMs,  -(ltMinusLs * ltMinusLs) * mtMinusMs,   -ltMinusLs * mtMinusMs * mtMinusMs, 1,
+                    }
+          
+                    reverse = F[1, 0] > 0
+                }
+            case .Cusp:
+                ls := outD[2]
+                lt := 3.0 * outD[1]
+                lsMinusLt := ls - lt
+                F = {
+                    ls,                         ls * ls * ls,                       1,  0,
+                    (ls - (1.0 / 3.0) * lt),    ls * ls * lsMinusLt,                1,  0,
+                    ls - (2.0 / 3.0) * lt,      lsMinusLt * lsMinusLt * ls,         1,  0,
+                    lsMinusLt,                  lsMinusLt * lsMinusLt * lsMinusLt,  1,  1,
+                }
+                reverse = true
+            case .Unknown:
+                panicLog("GetCubicCurveType: unknown curve type")
+        }
     }
-    if reverse {
+   
+
+    if repeat || _subdiv != 0.0 {
+        //TODO Quadratic
+        if subdiv == 0.0 {
+            subdiv = _subdiv
+        }
+        x01 := (pts[1].x - pts[0].x) * subdiv + pts[0].x
+        y01 := (pts[1].y - pts[0].y) * subdiv + pts[0].y
+        x12 := (pts[2].x - pts[1].x) * subdiv + pts[1].x
+        y12 := (pts[2].y - pts[1].y) * subdiv + pts[1].y
+
+        x23 := (pts[3].x - pts[2].x) * subdiv + pts[2].x
+        y23 := (pts[3].y - pts[2].y) * subdiv + pts[2].y
+
+        x012 := (x12 - x01) * subdiv + x01
+        y012 := (y12 - y01) * subdiv + y01
+
+        x123 := (x23 - x12) * subdiv + x12
+        y123 := (y23 - y12) * subdiv + y12
+
+        x0123 := (x123 - x012) * subdiv + x012
+        y0123 := (y123 - y012) * subdiv + y012
+
+        // non_zero_append(indList, u32(len(vertList)))
+        // non_zero_append(indList, u32(len(vertList)) + 1)
+        // non_zero_append(indList, u32(len(vertList)) + 2)
+
+        // non_zero_append(vertList, ShapeVertex2D{
+        //     uvw = {1, 0, 0},
+        //     color = color,
+        //     pos = pts[0],
+        // })
+        // non_zero_append(vertList, ShapeVertex2D{
+        //     uvw = {1, 0, 0},
+        //     color = color,
+        //     pos = PointF{x0123, y0123 },
+        // })
+        // non_zero_append(vertList, ShapeVertex2D{
+        //     uvw = {1, 0, 0},
+        //     color = color,
+        //     pos = pts[3],
+        // })
+
+        err := _Shapes_ComputeLine(poly, vertList, indList, {pts[0], { x01, y01 }, { x012, y012 }, { x0123, y0123 }}, type, color, _reverse, 0.0, true)
+        if err != .None do return err
+        err = _Shapes_ComputeLine(poly, vertList, indList, {{ x0123, y0123 }, { x123, y123 }, { x23, y23 }, pts[3]}, type, color, _reverse, 0.0, true)
+        if err != .None do return err
+
+        return .None
+    }
+
+    if reverse != _reverse {
         F = reverseOrientation(F)
     }
 
-    appendLine :: proc (vertList:^[dynamic]ShapeVertex2D, indList:^[dynamic]u32, pts:[]PointF, F:matrix[4,4]f32, color:Point3DwF) {
+    appendLine :: proc (poly:^[dynamic]PointF, vertList:^[dynamic]ShapeVertex2D, indList:^[dynamic]u32, pts:[]PointF, F:matrix[4,4]f32, color:Point3DwF) {
         if len(pts) == 2 {
             return
         }
@@ -432,15 +484,31 @@ LineSplitLine :: proc "contextless" (pts:[2][$N]$T, t:T) -> (outPts1:[2][N]T, ou
                     non_zero_append(indList, indices[(k + 1)%3])
                     non_zero_append(indList, start + i)
                 }
+                if i == 1 {
+                    if PointLineLeftOrRight(pts[2], pts[0], pts[3]) > 0 {
+                        non_zero_append(poly, pts[1])
+                    }
+                } else if i == 2 {
+                    if PointLineLeftOrRight(pts[1], pts[0], pts[3]) > 0 {
+                        non_zero_append(poly, pts[1])
+                    }
+                }
                 return
             }
         }
+
         b, _ := LinesIntersect(vertList[start].pos, vertList[start + 2].pos, vertList[start + 1].pos, vertList[start + 3].pos)
         if b {
             if linalg.length2(vertList[start + 2].pos - vertList[start].pos) < linalg.length2(vertList[start + 3].pos - vertList[start + 1].pos) {
                 non_zero_append(indList, start, start + 1, start + 2, start, start + 2, start + 3)
             } else {
                 non_zero_append(indList, start, start + 1, start + 3, start + 1, start + 2, start + 3)
+            }
+            if PointLineLeftOrRight(pts[1], pts[0], pts[3]) > 0 {
+                non_zero_append(poly, pts[1])
+            }
+            if PointLineLeftOrRight(pts[2], pts[0], pts[3]) > 0 {
+                non_zero_append(poly, pts[2])
             }
             return
         }
@@ -451,6 +519,12 @@ LineSplitLine :: proc "contextless" (pts:[2][$N]$T, t:T) -> (outPts1:[2][N]T, ou
             } else {
                 non_zero_append(indList, start, start + 1, start + 2, start + 2, start + 1, start + 3)
             }
+            if PointLineLeftOrRight(pts[1], pts[0], pts[3]) > 0 {
+                non_zero_append(poly, pts[1])
+            }
+            if PointLineLeftOrRight(pts[2], pts[0], pts[3]) > 0 {
+                non_zero_append(poly, pts[2])
+            }
             return
         }
         if linalg.length2(vertList[start + 1].pos - vertList[start].pos) < linalg.length2(vertList[start + 3].pos - vertList[start + 2].pos) {
@@ -458,28 +532,29 @@ LineSplitLine :: proc "contextless" (pts:[2][$N]$T, t:T) -> (outPts1:[2][N]T, ou
         } else {
             non_zero_append(indList, start, start + 2, start + 3, start + 3, start + 2, start + 1)
         }
+        //TODO
     }
-    appendLine(vertList, indList, pts_[:len(pts)], F, color)
-    if segmentCreated {
-        appendLine(vertList, indList, pts2[:len(pts)], F2, color)
-    }
+    non_zero_append(poly, pts[0])
+    appendLine(poly, vertList, indList, pts_[:len(pts)], F, color)
+
     return .None
 }
+
 
 Shapes_ComputePolygon :: proc(poly:^Shapes, allocator := context.allocator) -> (res:^RawShape = nil, err:ShapesError = .None) {
     vertList:[dynamic]ShapeVertex2D = make_non_zeroed_dynamic_array([dynamic]ShapeVertex2D, allocator)
 
     indList:[dynamic]u32 = make_non_zeroed_dynamic_array([dynamic]u32, context.temp_allocator)
     polyT:[dynamic]PointF = make_non_zeroed_dynamic_array([dynamic]PointF, context.temp_allocator)
-    polyT1:[dynamic]PointF = make_non_zeroed_dynamic_array([dynamic]PointF, context.temp_allocator)
-    polyT2:[dynamic]PointF = make_non_zeroed_dynamic_array([dynamic]PointF, context.temp_allocator)
+    //polyT1:[dynamic]PointF = make_non_zeroed_dynamic_array([dynamic]PointF, context.temp_allocator)
+    //polyT2:[dynamic]PointF = make_non_zeroed_dynamic_array([dynamic]PointF, context.temp_allocator)
     nPolysT:[dynamic]u32 = make_non_zeroed_dynamic_array([dynamic]u32, context.temp_allocator)
     defer {
         delete(indList)
         delete(polyT)
         delete(nPolysT)
-        delete(polyT2)
-        delete(polyT1)
+        //delete(polyT2)
+        //delete(polyT1)
     }
 
     res = new_non_zeroed(RawShape, allocator)
@@ -492,123 +567,108 @@ Shapes_ComputePolygon :: proc(poly:^Shapes, allocator := context.allocator) -> (
     start :u32 = 0
     ns :u32 = 0
     polyLen :u32 = u32(len(poly.poly))
+    typeIdx :u32 = 0
     for n,i in poly.nPolys {
-        typeIdx :u32 = 0
-        clear(&polyT2)
-        clear(&polyT1)
+        //clear(&polyT2)
+        //clear(&polyT1)
+
+        rev := GetPolygonOrientation(poly.poly[start:start+n]) == .Clockwise ? true : false
+
         for i:u32 = start; i < start+n; typeIdx += 1 {
-            prevIdx :: #force_inline proc "contextless" (i:u32, len:u32) -> u32 {
-                if i > 0 do return i - 1
-                return len - 1
-            }
-            nextIdx :: #force_inline proc "contextless" (i:u32, len:u32) -> u32 {
-                if i < len - 1 do return i + 1
-                return 0
+            SPLIT_CURVE :: proc "contextless" (poly:[]PointF, pts:[$N]PointF, start:u32) -> f32 {
+                for p, i in poly {
+                    if !(u32(i) >= start && u32(i) < start + u32(N)) {
+                        when N == 3 {
+                            if PointInTriangle(p, pts[0], pts[1], pts[2]) {
+                                t := PointDeltaInLine(p, pts[0], pts[2])
+                                assert_contextless(t >= 0.0 && t <= 1.0)
+                                return t
+                            }
+                        } else when N == 4 {
+                            res, _ := LinesIntersect(pts[0], pts[2], pts[1], pts[3])
+                            if res {
+                                if PointInPolygon(p, []PointF{pts[0], pts[1], pts[2], pts[3]}) {
+                                    t := PointDeltaInLine(p, pts[0], pts[3])
+                                    assert_contextless(t >= 0.0 && t <= 1.0)
+                                    return t
+                                }
+                            }
+                        } else {
+                            #assert(N == 3 || N == 4)
+                        }
+                    } 
+                }
+                return 0.0
             }
             if poly.types[typeIdx] == .Line {
                 if poly.colors != nil && poly.colors[i] != nil {
                     non_zero_append(&polyT, poly.poly[i])
                 }
-                if poly.strokeColors != nil &&poly.strokeColors[i] != nil && poly.thickness[i] > 0 {
-                    p := LineExtendPoint(poly.poly[prevIdx(i, polyLen)], poly.poly[i], poly.poly[nextIdx(i, polyLen)], poly.thickness[i], .Counterclockwise)
-                    p2 := LineExtendPoint(poly.poly[prevIdx(i, polyLen)], poly.poly[i], poly.poly[nextIdx(i, polyLen)], -poly.thickness[i], .Counterclockwise)
-                    non_zero_append(&polyT1, p)
-                    non_zero_append(&polyT2, p2)
+                if poly.strokeColors != nil && poly.strokeColors[i] != nil && poly.thickness[i] > 0 {
+                    //TODO
                 }
                 i += 1
             } else if poly.types[typeIdx] == .Quadratic {
+                pts := [3]PointF{poly.poly[i], poly.poly[i+1], i + 2 == u32(len(poly.poly)) ? poly.poly[start] : poly.poly[i+2]}
+                subdiv := SPLIT_CURVE(poly.poly, pts, i)
                 if poly.colors != nil && poly.colors[i] != nil {
-                    non_zero_append(&polyT, poly.poly[i])
-                    err = _Shapes_ComputeLine(&vertList, &indList, poly.poly[i:i+3], .Quadratic, poly.colors[i].?)
+                    err = _Shapes_ComputeLine(&polyT,
+                        &vertList,
+                        &indList,
+                        pts[:],
+                        .Quadratic,
+                        poly.colors[i].?,
+                        rev,
+                        subdiv,)
                     if err != .None do return
                 }
                 if poly.strokeColors != nil && poly.strokeColors[i] != nil && poly.thickness[i] > 0 {
-                    p:[3]PointF
-                    p2:[3]PointF
-                    p[0] = LineExtendPoint(poly.poly[prevIdx(i, polyLen)], poly.poly[i], poly.poly[i+1], poly.thickness[i], .Counterclockwise)
-                    p[1] = LineExtendPoint(poly.poly[i], poly.poly[i+1], poly.poly[i+2], poly.thickness[i], .Counterclockwise)
-                    p[2] = LineExtendPoint(poly.poly[i+1], poly.poly[i+2], poly.poly[nextIdx(i, polyLen)], poly.thickness[i], .Counterclockwise)
-                    
-                    p2[0] = LineExtendPoint(poly.poly[prevIdx(i, polyLen)], poly.poly[i], poly.poly[i+1], -poly.thickness[i], .Counterclockwise)
-                    p2[1] = LineExtendPoint(poly.poly[i], poly.poly[i+1], poly.poly[i+2], -poly.thickness[i], .Counterclockwise)
-                    p2[2] = LineExtendPoint(poly.poly[i+1], poly.poly[i+2], poly.poly[nextIdx(i, polyLen)], -poly.thickness[i], .Counterclockwise)
-
-                    if PointLineDistance(p2[1], p[0], p[2]) > 0 {
-                        pT := NearestPointBetweenPointAndLine(p2[1], p[0], p[2])
-                        _, t := PointInLine(pT, p[0], p[2])
-                        ps:[3]PointF
-                        p, ps = LineSplitQuadratic(p, t)
-                        err = _Shapes_ComputeLine(&vertList, &indList, p[:], .Quadratic, poly.strokeColors[i].?)
-                        if err != .None do return
-                        err = _Shapes_ComputeLine(&vertList, &indList, ps[:], .Quadratic, poly.strokeColors[i].?)
-                        if err != .None do return
-                        non_zero_append(&polyT1, p[0])
-                        non_zero_append(&polyT1, ps[0])
-                    } else {
-                        err = _Shapes_ComputeLine(&vertList, &indList, p[:], .Quadratic, poly.strokeColors[i].?)
-                        if err != .None do return
-                        non_zero_append(&polyT1, p[0])
-                    }
-                    non_zero_append(&polyT2, p2[0])
+                   //TODO
                 }
                 i += 2
             } else {
-                APPEND_CUBIC :: proc (polyT:^[dynamic]PointF, pts:[4]PointF) {
-                    if PointLineDistance(pts[1], pts[0], pts[3]) > 0 {
-                        non_zero_append(polyT, pts[1])
-                    }
-                    if PointLineDistance(pts[2], pts[0], pts[3]) > 0 {
-                        non_zero_append(polyT, pts[2])
-                    }
-                }
-                CALC_CUBIC :: proc (polyT:^[dynamic]PointF, vertList:^[dynamic]ShapeVertex2D, indList:^[dynamic]u32, pts:[4]PointF, color:Point3DwF) -> (err:ShapesError = .None) {
-                    non_zero_append(polyT, pts[0])
+                CALC_CUBIC :: proc (polyT:^[dynamic]PointF,
+                    vertList:^[dynamic]ShapeVertex2D,
+                    indList:^[dynamic]u32,
+                    pts:[]PointF,
+                    color:Point3DwF,
+                    _reverse := false,
+                    _subdiv:f32 = 0.0) -> (err:ShapesError = .None) {
+
+                    ex: Maybe(PointF)
                     vlen := len(vertList^)
-                    err = _Shapes_ComputeLine(vertList, indList, []PointF{pts[0], pts[1], pts[2], pts[3]}, .Unkown, color)
+                    err = _Shapes_ComputeLine(polyT, vertList, indList, pts, .Unknown, color, _reverse, _subdiv, )
                     if err != .None do return
-                    if vlen + 4 < len(vertList^) {
-                        APPEND_CUBIC(polyT, {vertList^[vlen - 1].pos, vertList^[vlen - 1 + 1].pos, vertList^[vlen - 1 + 2].pos, vertList^[vlen - 1 + 3].pos})
-                        non_zero_append(polyT, vertList^[vlen - 1 + 3].pos)
-                        APPEND_CUBIC(polyT, {vertList^[vlen - 1 + 3].pos, vertList^[vlen - 1 + 4].pos, vertList^[vlen - 1 + 5].pos, vertList^[vlen - 1 + 6].pos})
-                    } else {
-                        APPEND_CUBIC(polyT, {pts[0], pts[1], pts[2], pts[3]})
-                    }
                     return
                 }
+                pts := [4]PointF{poly.poly[i], poly.poly[i+1], poly.poly[i+2], i + 3 == u32(len(poly.poly)) ? poly.poly[start] : poly.poly[i+3]}
+                subdiv := SPLIT_CURVE(poly.poly, pts, i)
+                assert(subdiv >= 0.0 && subdiv <= 1.0)
                 if poly.colors != nil && poly.colors[i] != nil {
-                    err = CALC_CUBIC(&polyT, &vertList, &indList, {poly.poly[i], poly.poly[i+1], poly.poly[i+2], poly.poly[i+3]}, poly.colors[i].?)
+                    err = CALC_CUBIC(&polyT,
+                        &vertList,
+                        &indList,
+                        pts[:],
+                        poly.colors[i].?,
+                        rev,
+                        subdiv)
                     if err != .None do return
                 }
                 if poly.strokeColors != nil && poly.strokeColors[i] != nil && poly.thickness[i] > 0 {
-                    p:[4]PointF
-                    p2:[4]PointF
-                    p[0] = LineExtendPoint(poly.poly[prevIdx(i, polyLen)], poly.poly[i], poly.poly[i+1], poly.thickness[i], .Counterclockwise)
-                    p[1] = LineExtendPoint(poly.poly[i], poly.poly[i+1], poly.poly[i+2], poly.thickness[i], .Counterclockwise)
-                    p[2] = LineExtendPoint(poly.poly[i+1], poly.poly[i+2], poly.poly[i+3], poly.thickness[i], .Counterclockwise)
-                    p[3] = LineExtendPoint(poly.poly[i+2], poly.poly[i+3], poly.poly[nextIdx(i, polyLen)], poly.thickness[i], .Counterclockwise)
-                    
-                    p2[0] = LineExtendPoint(poly.poly[prevIdx(i, polyLen)], poly.poly[i], poly.poly[i+1], -poly.thickness[i], .Counterclockwise)
-                    p2[1] = LineExtendPoint(poly.poly[i], poly.poly[i+1], poly.poly[i+2], -poly.thickness[i], .Counterclockwise)
-                    p2[2] = LineExtendPoint(poly.poly[i+1], poly.poly[i+2], poly.poly[i+3], -poly.thickness[i], .Counterclockwise)
-                    p2[3] = LineExtendPoint(poly.poly[i+2], poly.poly[i+3], poly.poly[nextIdx(i, polyLen)], -poly.thickness[i], .Counterclockwise)
-
-                    err = CALC_CUBIC(&polyT1, &vertList, &indList, {p[0], p[1], p[2], p[3]}, poly.strokeColors[i].?)
-                    if err != .None do return
-                    err = CALC_CUBIC(&polyT2, &vertList, &indList, {p2[0], p2[1], p2[2], p2[3]}, poly.strokeColors[i].?)
-                    if err != .None do return
+                    //TODO
                 }
                 i += 3
             }
         }
         non_zero_append(&nPolysT, u32(len(polyT)) - ns)
-        if len(polyT1) > 0 {
-            non_zero_append(&polyT, ..polyT1[:])
-            non_zero_append(&nPolysT, auto_cast len(polyT1))
-        }
-        if len(polyT2) > 0 {
-            non_zero_append(&polyT, ..polyT2[:])
-            non_zero_append(&nPolysT, auto_cast len(polyT2))
-        }
+        // if len(polyT1) > 0 {
+        //     non_zero_append(&polyT, ..polyT1[:])
+        //     non_zero_append(&nPolysT, auto_cast len(polyT1))
+        // }
+        // if len(polyT2) > 0 {
+        //     non_zero_append(&polyT, ..polyT2[:])
+        //     non_zero_append(&nPolysT, auto_cast len(polyT2))
+        // }
         start += n
         ns = u32(len(polyT))
     }
@@ -618,7 +678,7 @@ Shapes_ComputePolygon :: proc(poly:^Shapes, allocator := context.allocator) -> (
         delete(res.indices, allocator)
     }
     start = 0
-    vLen :u32= auto_cast len(vertList)//Existing Curve Vertices Length
+    vLen :u32 = auto_cast len(vertList)//Existing Curve Vertices Length
     for _, i in nPolysT {
         for p in polyT[start:start+nPolysT[i]] {
             non_zero_append(&vertList, ShapeVertex2D{

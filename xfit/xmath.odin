@@ -165,39 +165,54 @@ epsilonEqual :: proc "contextless" (a:$T, b:T) -> bool where intrinsics.type_is_
 }
 
 
-
-// Algorithm from http://www.blackpawn.com/texts/pointinpoly/default.html
 PointInTriangle :: proc "contextless" (p : [2]$T, a : [2]T, b : [2]T, c : [2]T) -> bool where intrinsics.type_is_float(T){
-    v0 := c - a
-    v1 := b - a
-	v2 := p - a
-
-	dot00 := linalg.vector_dot(v0, v1)
-	dot01 := linalg.vector_dot(v0, v1)
-	dot02 := linalg.vector_dot(v0, v2)
-	dot11 := linalg.vector_dot(v1, v1)
-	dot12 := linalg.vector_dot(v1, v2)
-	denominator := dot00 * dot11 - dot01 * dot01
-	if denominator == 0 do return false
-
-	inverseDenominator := 1 / denominator
-	u := (dot11 * dot02 - dot01 * dot12) * inverseDenominator
-	v := (dot00 * dot12 - dot01 * dot02) * inverseDenominator
-
-	return (u >= 0) && (v >= 0) && (u + v < 1)
+    sign :: proc "contextless" (p1, p2, p3: [2]T) -> T {
+        return (p1[0] - p3[0]) * (p2[1] - p3[1]) - (p2[0] - p3[0]) * (p1[1] - p3[1])
+    }
+    
+    d1 := sign(p, a, b)
+    d2 := sign(p, b, c)
+    d3 := sign(p, c, a)
+    
+    has_neg := d1 < 0 || d2 < 0 || d3 < 0
+    has_pos := d1 > 0 || d2 > 0 || d3 > 0
+    
+    return !(has_neg && has_pos)
 }
 
 PointInLine :: proc "contextless" (p:[2]$T, l0:[2]T, l1:[2]T) -> (bool, T) where intrinsics.type_is_float(T) {
-	a := l1.y - l0.y
-	b := l0.x - l1.x
-	c := l1.x * l0.y + l0.x * l1.y
-	res := a * p.x + b * p.y + c
+	A := (l0.y - l1.y) / (l0.x - l1.x)
+	B := l0.y - A * l0.x
 
-	return res == 0 &&
+	pY := A * p.x + B
+	res := p.y >= pY - epsilon(T) && p.y <= pY + epsilon(T) 
+	t :T = 0.0
+	if res {
+		minX := min(l0.x, l1.x)
+		maxX := max(l0.x, l1.x)
+		t = (p.x - minX) / (maxX - minX)
+	}
+
+	return res &&
 		p.x >= min(l0.x, l1.x) &&
 		p.x <= max(l0.x, l1.x) &&
 		p.y >= min(l0.y, l1.y) &&
-		p.y <= max(l0.y, l1.y), res
+		p.y <= max(l0.y, l1.y), t
+}
+
+PointDeltaInLine :: proc "contextless" (p:[2]$T, l0:[2]T, l1:[2]T) -> T where intrinsics.type_is_float(T) {
+	A := (l0.y - l1.y) / (l0.x - l1.x)
+	B := l0.y - A * l0.x
+
+	pp := NearestPointBetweenPointAndLine(p, l0, l1)
+
+	pY := A * pp.x + B
+	t :T = 0.0
+	minX := min(l0.x, l1.x)
+	maxX := max(l0.x, l1.x)
+	t = (p.x - minX) / (maxX - minX)
+
+	return t
 }
 
 PointInVector :: proc "contextless" (p:[2]$T, v0:[2]T, v1:[2]T) -> (bool, T) where intrinsics.type_is_float(T) {
@@ -208,7 +223,7 @@ PointInVector :: proc "contextless" (p:[2]$T, v0:[2]T, v1:[2]T) -> (bool, T) whe
 	return res == 0, res
 }
 
-PointLineDistance :: #force_inline proc "contextless" (p : [2]$T, l0 : [2]T, l1 : [2]T) -> T where intrinsics.type_is_float(T) {
+PointLineLeftOrRight :: #force_inline proc "contextless" (p : [2]$T, l0 : [2]T, l1 : [2]T) -> T where intrinsics.type_is_float(T) {
 	return (l1.x - l0.x) * (p.y - l0.y) - (p.x - l0.x) * (l1.y - l0.y)
 }
 
@@ -243,6 +258,17 @@ CenterPointInPolygon :: proc "contextless" (polygon : [][2]$T) -> [2]T where int
 	return p
 }
 
+GetPolygonOrientation :: proc "contextless" (polygon : [][2]$T) -> PolyOrientation where intrinsics.type_is_float(T) {
+	res :f32 = 0
+	for i in 0..<len(polygon) {
+		j := (i + 1) % len(polygon)
+		factor := (polygon[j].x - polygon[i].x) * (polygon[j].y + polygon[i].y)
+		res += factor
+	}
+
+	return res > 0 ? .Clockwise : .CounterClockwise
+}
+
 LineInPolygon :: proc "contextless" (a : [2]$T, b : [2]T, polygon : [][2]T, checkInsideLine := true) -> bool where intrinsics.type_is_float(T) {
 	//Points a, b must all be inside the polygon so that line a, b and polygon line segments do not intersect, so b does not need to be checked.
 	if checkInsideLine && PointInPolygon(a, polygon) do return true
@@ -260,7 +286,7 @@ LineInPolygon :: proc "contextless" (a : [2]$T, b : [2]T, polygon : [][2]T, chec
 	return false
 }
 
-LinesIntersect :: proc(a1 : [2]$T, a2 : [2]T, b1: [2]T, b2 : [2]T) -> (bool, [2]T) where intrinsics.type_is_float(T) {
+LinesIntersect :: proc "contextless" (a1 : [2]$T, a2 : [2]T, b1: [2]T, b2 : [2]T) -> (bool, [2]T) where intrinsics.type_is_float(T) {
 	a := a2 - a1
 	b := b2 - b1
 	ab := a1 - b1
@@ -275,12 +301,11 @@ LinesIntersect :: proc(a1 : [2]$T, a2 : [2]T, b1: [2]T, b2 : [2]T) -> (bool, [2]
 	return false, {}
 }
 
-NearestPointBetweenPointAndLine :: proc(p:[2]$T, l0:[2]T, l1:[2]T) -> [2]T where intrinsics.type_is_float(T) {
-	a := (l0.y - l1.y) / (l0.x - l1.x)
-	c := (l1.x - l0.x) / (l0.y - l1.y)
+NearestPointBetweenPointAndLine :: proc "contextless" (p:[2]$T, l0:[2]T, l1:[2]T) -> [2]T where intrinsics.type_is_float(T) {
+	AB := l1 - l0
+	AC := p - l0
 
-	x := (p.y - l0.y + l0.x * a - p.x) / (a - c)
-	return { x, a * p.x + l0.y - l0.x * a }
+	return l0 + AB * (linalg.vector_dot(AB, AC) / linalg.vector_dot(AB, AB))
 }
 
 Circle :: struct(T:typeid) where intrinsics.type_is_float(T) {
@@ -291,13 +316,17 @@ Circle :: struct(T:typeid) where intrinsics.type_is_float(T) {
 CircleF :: Circle(f32)
 CircleF64 :: Circle(f64)
 
-CCW :: enum {
+PolyOrientation :: enum {
 	Clockwise,
-	Counterclockwise
+	CounterClockwise
+}
+
+OppPolyOrientation :: #force_inline proc "contextless" (ccw:PolyOrientation) -> PolyOrientation {
+	return ccw == .Clockwise ? .CounterClockwise : .Clockwise
 }
 
 //https://stackoverflow.com/a/73061541
-LineExtendPoint :: proc "contextless" (prev:[2]$T, cur:[2]T, next:[2]T, thickness:T, ccw:CCW) -> [2]T where intrinsics.type_is_float(T) {
+LineExtendPoint :: proc "contextless" (prev:[2]$T, cur:[2]T, next:[2]T, thickness:T, ccw:PolyOrientation) -> [2]T where intrinsics.type_is_float(T) {
 	vn : [2]T = next - cur
 	vnn : [2]T = linalg.normalize(vn)
 	nnnX := vnn.y

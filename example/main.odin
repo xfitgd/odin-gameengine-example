@@ -2,6 +2,7 @@ package example
 
 import "core:fmt"
 import "core:reflect"
+import "core:os/os2"
 import "../xfit"
 
 is_android :: xfit.is_android
@@ -20,17 +21,28 @@ Init ::proc() {
 
     shape: ^xfit.Shape = xfit.AllocObject(xfit.Shape)
 
+    fontFileData, fontFileReadErr := os2.read_entire_file_from_path("SourceHanSerifK-ExtraLight.otf", context.temp_allocator)
+    defer delete(fontFileData, context.temp_allocator)
+    if fontFileReadErr != nil {
+        xfit.panicLog(fontFileReadErr)
+    }
+    vffData, freeTypeErr ,shapeErr := xfit.Font_ConvertFontFmtToVFF(fontFileData,0)
+
+
+    font, fontErr := xfit.Font_Init(vffData)
+
     shapes : xfit.Shapes
-    shapes.nPolys = []u32{5}
-    shapes.colors = []Maybe(xfit.Point3DwF){nil, nil, nil, nil, nil}
+    shapes.nPolys = []u32{6}
+    shapes.colors = []Maybe(xfit.Point3DwF){nil, nil, nil, nil, nil, nil}
     shapes.colors[0] = xfit.Point3DwF{1,0,0,1}
     shapes.colors[1] = xfit.Point3DwF{1,0,0,1}
     shapes.colors[2] = xfit.Point3DwF{1,0,0,1}
     shapes.colors[3] = xfit.Point3DwF{1,0,0,1}
     shapes.colors[4] = xfit.Point3DwF{1,0,0,1}
-    shapes.poly = []xfit.PointF{{-100,100}, {-150,0}, {-100,-100}, {100,-100}, {100,100}}
-    shapes.types = []xfit.CurveType{.Quadratic, .Line, .Line, .Line}
-    shapeErr := xfit.ShapeSrc_Init(&shapeSrc, &shapes)
+    shapes.colors[5] = xfit.Point3DwF{1,0,0,1}
+    shapes.poly = []xfit.PointF{{-100,100}, {-200,-200}, {-200,200}, {-100,-100}, {100,-100}, {100,100}}
+    shapes.types = []xfit.CurveType{.Unknown, .Line, .Line, .Line}
+    shapeErr = xfit.ShapeSrc_Init(&shapeSrc, &shapes)
     if shapeErr != .None {
         xfit.panicLog("ShapeSrc_Init failed\n")
     }
