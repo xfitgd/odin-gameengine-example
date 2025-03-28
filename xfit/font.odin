@@ -245,7 +245,7 @@ Font_ConvertFontFmtToVFF :: proc(_fontFmtData:[]byte, _fontFmtFaceIdx:uint) -> (
             poly.nPolys = resize_non_zeroed_slice(poly.nPolys, data.nPoly, context.temp_allocator)
             poly.nTypes = resize_non_zeroed_slice(poly.nTypes, data.nTypes, context.temp_allocator)
             poly.types = resize_non_zeroed_slice(poly.types, data.typeIdx, context.temp_allocator)
-            poly.colors = make_non_zeroed([]Maybe(Point3DwF), data.idx, context.temp_allocator)
+            poly.colors = make_non_zeroed([]Point3DwF, data.idx, context.temp_allocator)
             for &c in poly.colors {
                 c = Point3DwF{0,0,0,1}//?no matter
             }
@@ -272,7 +272,7 @@ Font_ConvertFontFmtToVFF :: proc(_fontFmtData:[]byte, _fontFmtFaceIdx:uint) -> (
         charLen += 1
     }
     (transmute([^]u32)(&outData[4]))[0] = auto_cast charLen
-
+    
     shrink(&outData)
 
     outSlice : []byte = outData[:] 

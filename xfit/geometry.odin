@@ -70,8 +70,8 @@ Shapes :: struct {
     nPolys:[]u32,
     nTypes:[]u32,
     types:[]CurveType,
-    colors:[]Maybe(Point3DwF),
-    strokeColors:[]Maybe(Point3DwF),
+    colors:[]Point3DwF,
+    strokeColors:[]Point3DwF,
     thickness:[]f32,
 }
 
@@ -287,11 +287,14 @@ LineSplitLine :: proc "contextless" (pts:[2][$N]$T, t:T) -> (outPts1:[2][N]T, ou
     repeat := false
     subdiv :f32 = 0.0
 
+    if curveType == .Line {
+        non_zero_append(poly, pts[0])
+        return .None
+    }
+
     if _subdiv == 0.0 {
         switch curveType {
             case .Line:
-                non_zero_append(poly, pts[0])
-                return .None
             case .Quadratic:
                 F = {
                     0,              0,              0,          0,
@@ -580,19 +583,19 @@ Shapes_ComputePolygon :: proc(poly:^Shapes, allocator := context.allocator) -> (
                     if !(u32(i) >= start && u32(i) < start + u32(N)) {
                         when N == 3 {
                             if PointInTriangle(p, pts[0], pts[1], pts[2]) {
-                                t := PointDeltaInLine(p, pts[0], pts[2])
-                                assert_contextless(t >= 0.0 && t <= 1.0)
-                                return t
+                                // t := PointDeltaInLine(p, pts[0], pts[2])
+                                // assert_contextless(t >= 0.0 && t <= 1.0)
+                                return 0.5
                             }
                         } else when N == 4 {
-                            res, _ := LinesIntersect(pts[0], pts[2], pts[1], pts[3])
-                            if res {
+                           // res, _ := LinesIntersect(pts[0], pts[2], pts[1], pts[3])
+                          //  if res {
                                 if PointInPolygon(p, []PointF{pts[0], pts[1], pts[2], pts[3]}) {
-                                    t := PointDeltaInLine(p, pts[0], pts[3])
-                                    assert_contextless(t >= 0.0 && t <= 1.0)
-                                    return t
+                                    // t := PointDeltaInLine(p, pts[0], pts[3])
+                                    // assert_contextless(t >= 0.0 && t <= 1.0)
+                                    return 0.5
                                 }
-                            }
+                            //}
                         } else {
                             #assert(N == 3 || N == 4)
                         }
@@ -601,60 +604,47 @@ Shapes_ComputePolygon :: proc(poly:^Shapes, allocator := context.allocator) -> (
                 return 0.0
             }
             if poly.types[typeIdx] == .Line {
-                if poly.colors != nil && poly.colors[i] != nil {
+                if poly.colors != nil && poly.colors[i].a > 0 {
                     non_zero_append(&polyT, poly.poly[i])
                 }
-                if poly.strokeColors != nil && poly.strokeColors[i] != nil && poly.thickness[i] > 0 {
+                if poly.strokeColors != nil && poly.strokeColors[i].a > 0 && poly.thickness[i] > 0 {
                     //TODO
                 }
                 i += 1
             } else if poly.types[typeIdx] == .Quadratic {
                 pts := [3]PointF{poly.poly[i], poly.poly[i+1], i + 2 == u32(len(poly.poly)) ? poly.poly[start] : poly.poly[i+2]}
-                subdiv := SPLIT_CURVE(poly.poly, pts, i)
-                if poly.colors != nil && poly.colors[i] != nil {
+                subdiv := !rev ? SPLIT_CURVE(poly.poly, pts, i) : 0.0
+                if poly.colors != nil && poly.colors[i].a > 0 {
                     err = _Shapes_ComputeLine(&polyT,
                         &vertList,
                         &indList,
                         pts[:],
                         .Quadratic,
-                        poly.colors[i].?,
+                        poly.colors[i],
                         rev,
                         subdiv,)
                     if err != .None do return
                 }
-                if poly.strokeColors != nil && poly.strokeColors[i] != nil && poly.thickness[i] > 0 {
+                if poly.strokeColors != nil && poly.strokeColors[i].a > 0 && poly.thickness[i] > 0 {
                    //TODO
                 }
                 i += 2
             } else {
-                CALC_CUBIC :: proc (polyT:^[dynamic]PointF,
-                    vertList:^[dynamic]ShapeVertex2D,
-                    indList:^[dynamic]u32,
-                    pts:[]PointF,
-                    color:Point3DwF,
-                    _reverse := false,
-                    _subdiv:f32 = 0.0) -> (err:ShapesError = .None) {
-
-                    ex: Maybe(PointF)
-                    vlen := len(vertList^)
-                    err = _Shapes_ComputeLine(polyT, vertList, indList, pts, .Unknown, color, _reverse, _subdiv, )
-                    if err != .None do return
-                    return
-                }
                 pts := [4]PointF{poly.poly[i], poly.poly[i+1], poly.poly[i+2], i + 3 == u32(len(poly.poly)) ? poly.poly[start] : poly.poly[i+3]}
-                subdiv := SPLIT_CURVE(poly.poly, pts, i)
+                subdiv := !rev ? SPLIT_CURVE(poly.poly, pts, i) : 0.0
                 assert(subdiv >= 0.0 && subdiv <= 1.0)
-                if poly.colors != nil && poly.colors[i] != nil {
-                    err = CALC_CUBIC(&polyT,
+                if poly.colors != nil && poly.colors[i].a > 0 {
+                    err = _Shapes_ComputeLine(&polyT,
                         &vertList,
                         &indList,
                         pts[:],
-                        poly.colors[i].?,
+                        .Unknown,
+                        poly.colors[i],
                         rev,
                         subdiv)
                     if err != .None do return
                 }
-                if poly.strokeColors != nil && poly.strokeColors[i] != nil && poly.thickness[i] > 0 {
+                if poly.strokeColors != nil && poly.strokeColors[i].a > 0 && poly.thickness[i] > 0 {
                     //TODO
                 }
                 i += 3
@@ -673,7 +663,7 @@ Shapes_ComputePolygon :: proc(poly:^Shapes, allocator := context.allocator) -> (
         ns = u32(len(polyT))
     }
 
-    res.indices = TrianguatePolygons(polyT[:], nPolysT[:], allocator) //TODO
+    res.indices = TrianguatePolygons(polyT[:], nPolysT[:], allocator)
     defer if err != .None {
         delete(res.indices, allocator)
     }
@@ -684,7 +674,7 @@ Shapes_ComputePolygon :: proc(poly:^Shapes, allocator := context.allocator) -> (
             non_zero_append(&vertList, ShapeVertex2D{
                 pos = p,
                 uvw = {1,0,0},
-                color = poly.colors[i].?,
+                color = poly.colors[i],
             })
         }
         start += nPolysT[i]
@@ -696,7 +686,7 @@ Shapes_ComputePolygon :: proc(poly:^Shapes, allocator := context.allocator) -> (
         res.indices = resize_non_zeroed_slice(res.indices, len(res.indices) + len(indList), allocator)
         intrinsics.mem_copy_non_overlapping(&res.indices[len(res.indices) - len(indList)], &indList[0], len(indList) * size_of(u32))
     }
-   
+
     shrink(&vertList)
     res.vertices = vertList[:]
     return

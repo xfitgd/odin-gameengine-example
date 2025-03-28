@@ -291,7 +291,7 @@ LinesIntersect :: proc "contextless" (a1 : [2]$T, a2 : [2]T, b1: [2]T, b2 : [2]T
 	b := b2 - b1
 	ab := a1 - b1
 	aba := linalg.vector_cross2(a, b)
-	if aba == 0 do return false, {}
+	if aba < 0.01 do return false, {}
 
 	A := linalg.vector_cross2(b, ab) / aba
 	B := linalg.vector_cross2(a, ab) / aba

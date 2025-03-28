@@ -33,13 +33,7 @@ Init ::proc() {
 
     shapes : xfit.Shapes
     shapes.nPolys = []u32{6}
-    shapes.colors = []Maybe(xfit.Point3DwF){nil, nil, nil, nil, nil, nil}
-    shapes.colors[0] = xfit.Point3DwF{1,0,0,1}
-    shapes.colors[1] = xfit.Point3DwF{1,0,0,1}
-    shapes.colors[2] = xfit.Point3DwF{1,0,0,1}
-    shapes.colors[3] = xfit.Point3DwF{1,0,0,1}
-    shapes.colors[4] = xfit.Point3DwF{1,0,0,1}
-    shapes.colors[5] = xfit.Point3DwF{1,0,0,1}
+    shapes.colors = []xfit.Point3DwF{{1,0,0,1}, {1,0,0,1}, {1,0,0,1}, {1,0,0,1}, {1,0,0,1}, {1,0,0,1}}
     shapes.poly = []xfit.PointF{{-100,100}, {-200,-200}, {-200,200}, {-100,-100}, {100,-100}, {100,100}}
     shapes.types = []xfit.CurveType{.Unknown, .Line, .Line, .Line}
     shapeErr = xfit.ShapeSrc_Init(&shapeSrc, &shapes)
