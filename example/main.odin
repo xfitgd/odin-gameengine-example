@@ -16,35 +16,44 @@ proj: xfit.Projection
 CANVAS_W :f32: 1280
 CANVAS_H :f32: 720
 
+font:^xfit.Font
+
 Init ::proc() {
     renderCmd = xfit.RenderCmd_Init()
 
     shape: ^xfit.Shape = xfit.AllocObject(xfit.Shape)
 
+    //SourceHanSerifK-ExtraLight.otf
+    //JSDongkang-Regular.ttf
     fontFileData, fontFileReadErr := os2.read_entire_file_from_path("SourceHanSerifK-ExtraLight.otf", context.temp_allocator)
     defer delete(fontFileData, context.temp_allocator)
     if fontFileReadErr != nil {
         xfit.panicLog(fontFileReadErr)
     }
-    vffData, freeTypeErr ,shapeErr := xfit.Font_ConvertFontFmtToVFF(fontFileData,0)
 
-
-    font, fontErr := xfit.Font_Init(vffData)
-
-    shapes : xfit.Shapes
-    shapes.nPolys = []u32{6}
-    shapes.colors = []xfit.Point3DwF{{1,0,0,1}, {1,0,0,1}, {1,0,0,1}, {1,0,0,1}, {1,0,0,1}, {1,0,0,1}}
-    shapes.poly = []xfit.PointF{{-100,100}, {-200,-200}, {-200,200}, {-100,-100}, {100,-100}, {100,100}}
-    shapes.types = []xfit.CurveType{.Unknown, .Line, .Line, .Line}
-    shapeErr = xfit.ShapeSrc_Init(&shapeSrc, &shapes)
-    if shapeErr != .None {
-        xfit.panicLog("ShapeSrc_Init failed\n")
+    freeTypeErr : xfit.FreetypeErr
+    font, freeTypeErr = xfit.Font_Init(fontFileData)
+    if freeTypeErr != .Ok {
+        xfit.panicLog(freeTypeErr)
     }
+
+    //xfit.Font_SetScale(font, 1)
+
+    renderOpt := xfit.FontRenderOpt{
+        color = xfit.Point3DwF{1,1,1,1},
+        flag = .GPU,
+        scale = xfit.PointF{3,3},
+    }
+
+    rawText := xfit.Font_RenderString(font, "안녕하세요, 반갑습니다.\n안녕히가세요.", renderOpt)
+    defer xfit.RawShape_Free(rawText)
+
+    xfit.ShapeSrc_InitRaw(&shapeSrc, rawText)
 
     xfit.Camera_Init(&camera, )
     xfit.Projection_InitMatrixOrthoWindow(&proj, CANVAS_W, CANVAS_H)
 
-    xfit.Shape_Init(shape, xfit.Shape, &shapeSrc, {0, 0, 0}, 0, {1, 1}, &camera, &proj)
+    xfit.Shape_Init(shape, xfit.Shape, &shapeSrc, {-600, 0, 0}, 0, {1, 1}, &camera, &proj)
 
     xfit.RenderCmd_AddObject(renderCmd, shape)
     

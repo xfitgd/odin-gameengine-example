@@ -15,6 +15,8 @@ VkResourceRange :: rawptr
 VkDescriptorType :: enum {
     SAMPLER,  //vk.DescriptorType.COMBINED_IMAGE_SAMPLER
     UNIFORM,  //vk.DescriptorType.UNIFORM_BUFFER
+    STORAGE,
+    STORAGE_IMAGE,//TODO
 }
 VkDescriptorPoolSize :: struct {type:VkDescriptorType, cnt:u32}
 VkDescriptorPoolMem :: struct {pool:vk.DescriptorPool, cnt:u32}
@@ -39,6 +41,7 @@ TextureUsage :: enum {
     FRAME_BUFFER,
     __INPUT_ATTACHMENT,
     __TRANSIENT_ATTACHMENT,
+    __STORAGE_IMAGE,
 }
 TextureUsages :: bit_set[TextureUsage]
 
@@ -60,6 +63,7 @@ BufferType :: enum {
     VERTEX,
     INDEX,
     UNIFORM,
+    STORAGE,
     __STAGING
 }
 
@@ -117,6 +121,8 @@ VkTextureResource :: struct {
     switch t {
         case .SAMPLER : return .COMBINED_IMAGE_SAMPLER
         case .UNIFORM : return .UNIFORM_BUFFER
+        case .STORAGE : return .STORAGE_BUFFER
+        case .STORAGE_IMAGE : return .STORAGE_IMAGE
     }
     return .UNIFORM_BUFFER
 }

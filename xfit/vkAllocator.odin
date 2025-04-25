@@ -827,6 +827,7 @@ VkBufferResource_Deinit :: proc(self: ^$T) where T == VkBufferResource || T == V
 		case .VERTEX: bufUsage = {.VERTEX_BUFFER}
 		case .INDEX: bufUsage = {.INDEX_BUFFER}
 		case .UNIFORM: bufUsage = {.UNIFORM_BUFFER}
+		case .STORAGE: bufUsage = {.STORAGE_BUFFER}
 		case .__STAGING: bufUsage = {.TRANSFER_SRC}
 	}
 
@@ -898,6 +899,7 @@ VkBufferResource_Deinit :: proc(self: ^$T) where T == VkBufferResource || T == V
 		}
 	}
 	if .__INPUT_ATTACHMENT in self.option.textureUsage do texUsage |= {.INPUT_ATTACHMENT}
+	if .__STORAGE_IMAGE in self.option.textureUsage do texUsage |= {.STORAGE}
 	if .__TRANSIENT_ATTACHMENT in self.option.textureUsage do texUsage |= {.TRANSIENT_ATTACHMENT}
 
 	tiling :vk.ImageTiling = .OPTIMAL
@@ -1088,7 +1090,7 @@ VkUpdateDescriptorSets :: proc(sets: []VkDescriptorSet) {
 		texCnt = 0
 		for n, i in s.size {	
 			switch n.type {
-				case .SAMPLER:
+				case .SAMPLER, .STORAGE_IMAGE:
 					non_zero_append(&gVkUpdateDesciptorSetList, vk.WriteDescriptorSet{
 						dstSet = s.__set,
 						dstBinding = s.bindings[i],
@@ -1102,7 +1104,7 @@ VkUpdateDescriptorSets :: proc(sets: []VkDescriptorSet) {
 						pNext = nil,
 					})
 					texCnt += n.cnt
-				case .UNIFORM:
+				case .UNIFORM, .STORAGE:
 					non_zero_append(&gVkUpdateDesciptorSetList, vk.WriteDescriptorSet{
 						dstSet = s.__set,
 						dstBinding = s.bindings[i],

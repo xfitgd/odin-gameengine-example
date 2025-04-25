@@ -166,18 +166,26 @@ epsilonEqual :: proc "contextless" (a:$T, b:T) -> bool where intrinsics.type_is_
 
 
 PointInTriangle :: proc "contextless" (p : [2]$T, a : [2]T, b : [2]T, c : [2]T) -> bool where intrinsics.type_is_float(T){
-    sign :: proc "contextless" (p1, p2, p3: [2]T) -> T {
-        return (p1[0] - p3[0]) * (p2[1] - p3[1]) - (p2[0] - p3[0]) * (p1[1] - p3[1])
-    }
-    
-    d1 := sign(p, a, b)
-    d2 := sign(p, b, c)
-    d3 := sign(p, c, a)
-    
-    has_neg := d1 < 0 || d2 < 0 || d3 < 0
-    has_pos := d1 > 0 || d2 > 0 || d3 > 0
-    
-    return !(has_neg && has_pos)
+	x0 := c.x - a.x;
+	y0 := c.y - a.y;
+	x1 := b.x - a.x;
+	y1 := b.y - a.y;
+	x2 := p.x - a.x;
+	y2 := p.y - a.y;
+
+	dot00 := x0 * x0 + y0 * y0;
+	dot01 := x0 * x1 + y0 * y1;
+	dot02 := x0 * x2 + y0 * y2;
+	dot11 := x1 * x1 + y1 * y1;
+	dot12 := x1 * x2 + y1 * y2;
+	denominator := dot00 * dot11 - dot01 * dot01;
+	if (denominator == 0.0) do return false;
+	// Compute
+	inverseDenominator := 1.0 / denominator;
+	u := (dot11 * dot02 - dot01 * dot12) * inverseDenominator;
+	v := (dot00 * dot12 - dot01 * dot02) * inverseDenominator;
+
+	return (u > 0.0) && (v > 0.0) && (u + v < 1.0);
 }
 
 PointInLine :: proc "contextless" (p:[2]$T, l0:[2]T, l1:[2]T) -> (bool, T) where intrinsics.type_is_float(T) {
@@ -227,21 +235,33 @@ PointLineLeftOrRight :: #force_inline proc "contextless" (p : [2]$T, l0 : [2]T, 
 	return (l1.x - l0.x) * (p.y - l0.y) - (p.x - l0.x) * (l1.y - l0.y)
 }
 
-//https://bowbowbow.tistory.com/24
 PointInPolygon :: proc "contextless" (p: [2]$T, polygon:[][2]T) -> bool where intrinsics.type_is_float(T) {
-	 //crosses는 점p와 오른쪽 반직선과 다각형과의 교점의 개수
-	 crosses := 0
-	 for i in  0..<len(polygon) {
-		j := (i + 1) % len(polygon)
-		//점 p가 선분 (polygon[i], polygon[j])의 y좌표 사이에 있음
-        if ((polygon[i].y > p.y) != (polygon[j].y > p.y)) {
-            //atX는 점 p를 지나는 수평선과 선분 (polygon[i], polygon[j])의 교점
-            atx := (polygon[j].x - polygon[i].x) * (p.y - polygon[i].y) / (polygon[j].y - polygon[i].y) + polygon[i].x;
-            //atX가 오른쪽 반직선과의 교점이 맞으면 교점의 개수를 증가시킨다.
-            if (p.x < atx) do crosses += 1;
+	crossProduct :: proc "contextless" (p1: [2]$T, p2 : [2]T, p3 : [2]T) -> T {
+		return (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x)
+	}
+	isPointOnSegment :: proc "contextless" (p: [2]$T, p1 : [2]T, p2 : [2]T) -> bool {
+		return crossProduct(p1, p2, p) == 0 && p.x >= min(p1.x, p2.x) && p.x <= max(p1.x, p2.x) && p.y >= min(p1.y, p2.y) && p.y <= max(p1.y, p2.y)
+	}
+	windingNumber := 0
+	for i in  0..<len(polygon) {
+		p1 := polygon[i]
+        p2 := polygon[(i + 1) % len(polygon)]
+
+        if (isPointOnSegment(p, p1, p2)) {
+            return false
         }
-	 }
-	 return (crosses % 2) > 0
+
+        if (p1.y <= p.y) {
+            if (p2.y > p.y && crossProduct(p1, p2, p) > 0) {
+                windingNumber += 1
+            }
+        } else {
+            if (p2.y <= p.y && crossProduct(p1, p2, p) < 0) {
+                windingNumber -= 1
+            }
+        }
+	}
+	return windingNumber != 0
 }
 
 CenterPointInPolygon :: proc "contextless" (polygon : [][2]$T) -> [2]T where intrinsics.type_is_float(T) {
@@ -286,19 +306,12 @@ LineInPolygon :: proc "contextless" (a : [2]$T, b : [2]T, polygon : [][2]T, chec
 	return false
 }
 
-LinesIntersect :: proc "contextless" (a1 : [2]$T, a2 : [2]T, b1: [2]T, b2 : [2]T) -> (bool, [2]T) where intrinsics.type_is_float(T) {
-	a := a2 - a1
-	b := b2 - b1
-	ab := a1 - b1
-	aba := linalg.vector_cross2(a, b)
-	if aba < 0.01 do return false, {}
-
-	A := linalg.vector_cross2(b, ab) / aba
-	B := linalg.vector_cross2(a, ab) / aba
-	if A <= 1 && B <= 1 && A >= 0 && B >= 0 {
-		return true, a1 + splat_2(A) * (a2 - a1) 
+LinesIntersect :: proc "contextless" (a1 : [2]$T, a2 : [2]T, b1: [2]T, b2 : [2]T) -> bool where intrinsics.type_is_float(T) {
+	Orientation :: proc "contextless" (p1 : [2]$T, p2 : [2]T, p3: [2]T) -> int {
+		crossProduct := (p2.y - p1.y) * (p3.x - p2.x) - (p3.y - p2.y) * (p2.x - p1.x);
+		return (crossProduct < 0.0) ? -1 : ((crossProduct > 0.0) ? 1 : 0);
 	}
-	return false, {}
+	return (Orientation(a1, a2, b1) != Orientation(a1, a2, b2) && Orientation(b1, b2, a1) != Orientation(b1, b2, a2));
 }
 
 NearestPointBetweenPointAndLine :: proc "contextless" (p:[2]$T, l0:[2]T, l1:[2]T) -> [2]T where intrinsics.type_is_float(T) {

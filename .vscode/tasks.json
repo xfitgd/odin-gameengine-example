@@ -10,12 +10,12 @@
             "problemMatcher": [],
             "group": {
                 "kind": "build",
-                "isDefault": true
+                "isDefault": true,
             },
             "presentation": {
-                "reveal": "silent",
-                "close": true
-            }
+                "reveal": "always",
+                "close": false,
+            },
         }
     ]
 }

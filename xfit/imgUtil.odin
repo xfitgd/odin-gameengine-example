@@ -14,6 +14,7 @@ TextureFmt :: enum {
     D24UnormS8Uint,
     D32SfloatS8Uint,
     D16UnormS8Uint,
+	R8Unorm,
 }
 
 @(require_results) TextureFmt_IsDepth :: proc  "contextless" (t:TextureFmt) -> bool {
@@ -36,6 +37,8 @@ TextureFmt :: enum {
             return 3
 		case .D32SfloatS8Uint:
             return 5
+		case .R8Unorm:
+			return 1
     }
     return 4
 }
@@ -56,6 +59,8 @@ TextureFmt :: enum {
 			return .D16_UNORM_S8_UINT
 		case .D32SfloatS8Uint:
 			return .D32_SFLOAT_S8_UINT
+		case .R8Unorm:
+			return .R8_UNORM
 	}
     return vkFmt.format
 }
@@ -72,6 +77,8 @@ TextureFmt :: enum {
 			return .D16UnormS8Uint
 		case .D32_SFLOAT_S8_UINT:
 			return .D32SfloatS8Uint
+		case .R8_UNORM:
+			return .R8Unorm
 	}
 	panicLog("unsupport format vkFmtToTextureFmt : ", t)
 }

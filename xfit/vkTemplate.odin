@@ -77,6 +77,33 @@ vkDefaultPipelineDepthStencilStateCreateInfo := vkPipelineDepthStencilStateCreat
 	}
 }
 
+@(require_results) vkCreateShaderStagesGS :: proc "contextless" (
+	vertModule: vk.ShaderModule,
+	fragModule: vk.ShaderModule,
+	geomModule: vk.ShaderModule,
+) -> [3]vk.PipelineShaderStageCreateInfo {
+	return [3]vk.PipelineShaderStageCreateInfo {
+		vk.PipelineShaderStageCreateInfo {
+			sType = vk.StructureType.PIPELINE_SHADER_STAGE_CREATE_INFO,
+			pName = "main",
+			module = vertModule,
+			stage = {.VERTEX},
+		},
+		vk.PipelineShaderStageCreateInfo {
+			sType = vk.StructureType.PIPELINE_SHADER_STAGE_CREATE_INFO,
+			pName = "main",
+			module = geomModule,
+			stage = {.GEOMETRY},
+		},
+		vk.PipelineShaderStageCreateInfo {
+			sType = vk.StructureType.PIPELINE_SHADER_STAGE_CREATE_INFO,
+			pName = "main",
+			module = fragModule,
+			stage = {.FRAGMENT},
+		},
+	}
+}
+
 @(require_results) vkDescriptorSetLayoutBindingInit :: proc "contextless"(
 	binding: u32,
 	descriptorCount: u32,
@@ -423,6 +450,18 @@ vkTransitionImageLayout :: proc(cmd:vk.CommandBuffer, image:vk.Image, mipLevels:
 		barrier.dstAccessMask = {.SHADER_READ}
 
 		srcStage = {.TRANSFER}
+		dstStage = {.FRAGMENT_SHADER}
+	} else if oldLayout == .UNDEFINED && newLayout == .COLOR_ATTACHMENT_OPTIMAL {
+		barrier.srcAccessMask = {}
+		barrier.dstAccessMask = {.SHADER_READ}
+
+		srcStage = {.TOP_OF_PIPE}
+		dstStage = {.FRAGMENT_SHADER}
+	} else if oldLayout == .UNDEFINED && newLayout == .GENERAL {
+		barrier.srcAccessMask = {}
+		barrier.dstAccessMask = {.SHADER_READ, .SHADER_WRITE}
+
+		srcStage = {.TOP_OF_PIPE}
 		dstStage = {.FRAGMENT_SHADER}
 	} else {
 		panicLog("unsupported layout transition!", oldLayout, newLayout)

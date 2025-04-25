@@ -12,8 +12,8 @@ import "xmem"
 
 ShapeVertex2D :: struct #align(1) {
     pos: PointF,
-    uvw: linalg.Vector3f32,
-    color: linalg.Vector4f32,
+    uvw: Point3DF,
+    color: Point3DwF,
 };
 
 ResourceUsage :: enum {GPU,CPU}
@@ -42,14 +42,14 @@ ColorTransform :: struct {
     __in: __ColorMatrixIn,
 }
 
-@private __ColorMatrixIn :: struct {
+__ColorMatrixIn :: struct {
     mat: Matrix,
     matUniform:VkBufferResource,
     checkInit: ICheckInit,
 }
 
 
-@private __MatrixIn :: struct {
+__MatrixIn :: struct {
     mat: Matrix,
     matUniform:VkBufferResource,
     pos: Point3DF,
@@ -58,7 +58,7 @@ ColorTransform :: struct {
     checkInit: ICheckInit,
 }
 
-@private __IObjectIn :: struct {
+__IObjectIn :: struct {
     set:VkDescriptorSet,
     camera: ^Camera,
     projection: ^Projection,
@@ -75,7 +75,7 @@ IObjectVTable :: struct {
     __in: __IObjectVTable,
 }
 
-@private __IObjectVTable :: struct {
+__IObjectVTable :: struct {
     __GetUniformResources: proc (self:^IObject) -> []VkUnionResource,
 }
 
@@ -83,7 +83,7 @@ IObject :: struct {
     __in: __IObjectIn,
 }
 
-@private __TextureIn :: struct {
+__TextureIn :: struct {
     texture:VkTextureResource,
     set:VkDescriptorSet,
     sampler: vk.Sampler,
@@ -98,13 +98,13 @@ TextureArray :: struct {
     __in: __TextureArrayIn,
 }
 
-@private __TextureArrayIn :: distinct __TextureIn
+__TextureArrayIn :: distinct __TextureIn
 
 TileTextureArray :: struct {
     __in: __TileTextureArrayIn,
 }
 
-@private __TileTextureArrayIn :: struct {
+__TileTextureArrayIn :: struct {
     using _:__TextureArrayIn,
     allocPixels:[]byte,
 }
@@ -114,7 +114,7 @@ Image :: struct {
     __in2: __ImageIn,
 }
 
-@private __ImageIn :: struct {
+__ImageIn :: struct {
     src: ^Texture,
 }
 
@@ -123,7 +123,7 @@ AnimateImage :: struct {
     __in2: __AnimateImageIn,
 }
 
-@private __AnimateImageIn :: struct {
+__AnimateImageIn :: struct {
     frameUniform:VkBufferResource,
     frame:u32,
     src: ^TextureArray,
@@ -134,7 +134,7 @@ TileImage :: struct {
     __in2: __TileImageIn,
 }
 
-@private __TileImageIn :: struct {
+__TileImageIn :: struct {
     tileUniform:VkBufferResource,
     tileIdx:u32,
     src: ^TileTextureArray,
@@ -146,9 +146,13 @@ TileImage :: struct {
 }
 
 @private __IndexBuf :: distinct __VertexBuf(u32)
+@private __StorageBuf :: struct($NodeType:typeid) {
+    buf:VkBufferResource,
+    checkInit: ICheckInit,
+}
 
 
-@private __ShapeSrcIn :: struct {
+__ShapeSrcIn :: struct {
     //?vertexBuf, indexBuf에 checkInit: ICheckInit 있으므로 따로 필요없음
     vertexBuf:__VertexBuf(ShapeVertex2D),
     indexBuf:__IndexBuf,
@@ -163,7 +167,7 @@ Shape :: struct {
     __in2:__ShapeIn,
 }
 
-@private __ShapeIn :: struct {
+__ShapeIn :: struct {
     src: ^ShapeSrc,
 }
 
@@ -238,6 +242,29 @@ SetRenderClearColor :: proc "contextless" (color:Point3DwF) {
 }
 
 //AUTO DELETE USE vkDefAllocator
+@private __StorageBuf_Init :: proc (self:^__StorageBuf($NodeType), array:[]NodeType, _flag:ResourceUsage, _useGPUMem := false) {
+    xmem.ICheckInit_Init(&self.checkInit)
+    if len(array) == 0 do panicLog("StorageBuf_Init: array is empty")
+    VkBufferResource_CreateBuffer(&self.buf, {
+        len = vk.DeviceSize(len(array) * size_of(NodeType)),
+        type = .STORAGE,
+        resourceUsage = _flag,
+        single = false,
+        useGCPUMem = _useGPUMem,
+    }, mem.slice_to_bytes(array), false, vkDefAllocator)
+}
+
+@private __StorageBuf_Deinit :: proc (self:^__StorageBuf($NodeType)) {
+    xmem.ICheckInit_Deinit(&self.checkInit)
+
+    VkBufferResource_Deinit(&self.buf)
+}
+
+@private __StorageBuf_Update :: proc (self:^__StorageBuf($NodeType), array:[]NodeType) {
+    VkBufferResource_MapUpdateSlice(&self.buf, array, vkDefAllocator)
+}
+
+//AUTO DELETE USE vkDefAllocator
 @private __IndexBuf_Init :: proc (self:^__IndexBuf, array:[]u32, _flag:ResourceUsage, _useGPUMem := false) {
     xmem.ICheckInit_Init(&self.checkInit)
     if len(array) == 0 do panicLog("IndexBuf_Init: array is empty")
@@ -289,7 +316,7 @@ Projection_UpdateOrtho :: #force_inline proc(self:^Projection,  left:f32, right:
 
     r := 1.0 / (far - near)
     self.__in.mat = {
-        2.0 / windowWidthF, 0, 0, 0,
+        -2.0 / windowWidthF, 0, 0, 0,
         0, 2.0 / windowHeightF, 0, 0,
         0, 0, r, 0,
         0, 0, -r * near, 1,
@@ -387,17 +414,17 @@ Camera_UpdateMatrixRaw :: proc(self:^Camera, _mat:Matrix) {
     VkBufferResource_CopyUpdate(&self.__in.matUniform, &self.__in.mat)
 }
 
-@private __Camera_Update :: #force_inline proc(self:^Camera, eyeVec:Point3DF, focusVec:Point3DF, upVec:Point3DF = {0,0,1}, flipZAxisForVulkan := true) {
-    self.__in.mat = linalg.matrix4_look_at_f32(eyeVec, focusVec, upVec, flipZAxisForVulkan)
+@private __Camera_Update :: #force_inline proc(self:^Camera, eyeVec:Point3DF, focusVec:Point3DF, upVec:Point3DF = {0,0,1}) {
+    self.__in.mat = linalg.matrix4_look_at_f32(eyeVec, focusVec, upVec, false)
 }
 
-Camera_Init :: proc (self:^Camera, eyeVec:Point3DF = {0,0,-1}, focusVec:Point3DF = {0,0,0}, upVec:Point3DF = {0,1,0}, flipZAxisForVulkan := true) {
-    __Camera_Update(self, eyeVec, focusVec, upVec, flipZAxisForVulkan)
+Camera_Init :: proc (self:^Camera, eyeVec:Point3DF = {0,0,-1}, focusVec:Point3DF = {0,0,0}, upVec:Point3DF = {0,1,0}) {
+    __Camera_Update(self, eyeVec, focusVec, upVec)
     __Camera_Init(self)
 }
 
-Camera_Update :: proc(self:^Camera, eyeVec:Point3DF = {0,0,-1}, focusVec:Point3DF = {0,0,0}, upVec:Point3DF = {0,0,1}, flipZAxisForVulkan := true) {
-    __Camera_Update(self, eyeVec, focusVec, upVec, flipZAxisForVulkan)
+Camera_Update :: proc(self:^Camera, eyeVec:Point3DF = {0,0,-1}, focusVec:Point3DF = {0,0,0}, upVec:Point3DF = {0,0,1}) {
+    __Camera_Update(self, eyeVec, focusVec, upVec)
     Camera_UpdateMatrixRaw(self, self.__in.mat)
 }
 
@@ -699,11 +726,11 @@ Shape_UpdateProjection :: #force_inline proc(self:^Shape, projection:^Projection
 
 _Super_Shape_Draw :: proc (self:^Shape, cmd:vk.CommandBuffer) {
     xmem.ICheckInit_Check(&self.__in.__in.checkInit)
-    xmem.ICheckInit_Check(&self.__in2.src.__in.vertexBuf.checkInit)
 
     vk.CmdBindPipeline(cmd, .GRAPHICS, vkShapePipeline)
     vk.CmdBindDescriptorSets(cmd, .GRAPHICS, vkShapePipelineLayout, 0, 1, 
-        &self.__in.set.__set, 0, nil)
+        &([]vk.DescriptorSet{self.__in.set.__set})[0], 0, nil)
+
 
     offsets: vk.DeviceSize = 0
     vk.CmdBindVertexBuffers(cmd, 0, 1, &self.__in2.src.__in.vertexBuf.buf.__resource, &offsets)
@@ -1138,7 +1165,7 @@ Texture_Init :: proc(self:^Texture, #any_int width:int, #any_int height:int, pix
     self.__in.set.size = __singleSamplerPoolSizes[:]
     self.__in.set.layout = vkTexDescriptorSetLayout2
     self.__in.set.__set = 0
-
+   
     VkBufferResource_CreateTexture(&self.__in.texture, {
         width = auto_cast width,
         height = auto_cast height,
@@ -1151,7 +1178,34 @@ Texture_Init :: proc(self:^Texture, #any_int width:int, #any_int height:int, pix
         resourceUsage = resourceUsage,
         single = false,
     }, self.__in.sampler, pixels, true)
+
+    self.__in.set.__resources[0] = &self.__in.texture
+    VkUpdateDescriptorSets(mem.slice_ptr(&self.__in.set, 1))
 }
+
+//sampler nil default
+Texture_InitR8 :: proc(self:^Texture, #any_int width:int, #any_int height:int) {
+    xmem.ICheckInit_Init(&self.__in.checkInit)
+    self.__in.sampler = 0
+    self.__in.set.bindings = nil
+    self.__in.set.size = nil
+    self.__in.set.layout = 0
+    self.__in.set.__set = 0
+
+    VkBufferResource_CreateTexture(&self.__in.texture, {
+        width = auto_cast width,
+        height = auto_cast height,
+        useGCPUMem = false,
+        format = .R8Unorm,
+        samples = 1,
+        len = 1,
+        textureUsage = {.FRAME_BUFFER, .__INPUT_ATTACHMENT},
+        type = .TEX2D,
+        resourceUsage = .GPU,
+        single = true,
+    }, self.__in.sampler, nil)
+}
+
 
 Texture_InitDepthStencil :: proc(self:^Texture, #any_int width:int, #any_int height:int) {
     xmem.ICheckInit_Init(&self.__in.checkInit)

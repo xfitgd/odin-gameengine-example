@@ -83,34 +83,10 @@ CvtQuadraticToCubic1 :: #force_inline proc "contextless" (_end : PointF, _contro
 }
 
 
-RawShape_BytesSize :: proc(self:^RawShape) -> (size:int = 0) {
-    size += len(self.vertices) * size_of(ShapeVertex2D)
-    size += len(self.indices) * size_of(u32)
-
-    size += size_of(u32) * 2
-    size += 4//rsb0
-    return
-}
-
 RawShape_Free :: proc (self:^RawShape, allocator := context.allocator) {
     delete(self.vertices, allocator)
     delete(self.indices, allocator)
     free(self, allocator)
-}
-
-RawShape_ToCloneBytes :: proc (self:^RawShape, out:[^]byte) {
-    out[0] = 'r'
-    out[1] = 's'
-    out[2] = 'b'
-    out[3] = 0
-
-    (transmute([^]u32)(&out[4]))[0] = auto_cast len(self.vertices)
-    (transmute([^]u32)(&out[4]))[1] = auto_cast len(self.indices)
-
-    off := 4 + (2 * size_of(u32))
-    intrinsics.mem_copy_non_overlapping(&out[off], &self.vertices[0], len(self.vertices) * size_of(ShapeVertex2D))
-    off += len(self.vertices) * size_of(ShapeVertex2D)
-    intrinsics.mem_copy_non_overlapping(&out[off], &self.indices[0], len(self.indices) * size_of(u32))
 }
 
 RawShape_Clone :: proc (self:^RawShape, allocator := context.allocator) -> (res:^RawShape = nil) {
@@ -119,21 +95,6 @@ RawShape_Clone :: proc (self:^RawShape, allocator := context.allocator) -> (res:
     res.indices = make_non_zeroed_slice([]u32, len(self.indices), allocator)
     intrinsics.mem_copy_non_overlapping(&res.vertices[0], &self.vertices[0], len(self.vertices) * size_of(ShapeVertex2D))
     intrinsics.mem_copy_non_overlapping(&res.indices[0], &self.indices[0], len(self.indices) * size_of(u32))
-    return
-}
-
-RawShape_CloneFromBytes :: proc (_in :[]byte, allocator := context.allocator) -> (res:^RawShape = nil) {
-    if !(_in[0] == 'r' && _in[1] == 's' && _in[2] == 'b' && _in[3] == 0) do return
-
-    res = new(RawShape, allocator)
-    res.vertices = make_non_zeroed_slice([]ShapeVertex2D,  (transmute([^]u32)(&_in[4]))[0], allocator)
-    res.indices = make_non_zeroed_slice([]u32,  (transmute([^]u32)(&_in[4]))[1], allocator)
-
-    off := 4 + (2 * size_of(u32))
-    intrinsics.mem_copy_non_overlapping(&res.vertices[0], &_in[off], len(res.vertices) * size_of(ShapeVertex2D))
-    off += len(res.vertices) * size_of(ShapeVertex2D)
-    intrinsics.mem_copy_non_overlapping(&res.indices[0], &_in[off], len(res.indices) * size_of(u32))
-
     return
 }
 
@@ -161,22 +122,23 @@ GetCubicCurveType :: proc "contextless" (_start:[2]$T, _control0:[2]T, _control1
     D := 3 * outD[1] * outD[1] - 4 * outD[2] * outD[0]
     discr := outD[0] * outD[0] * D
 
-    if discr > epsilon(T) {
-        type = .Serpentine
-    } else if discr < -epsilon(T) {
-        type = .Loop
-    } else if abs(discr) <= epsilon(T) {
-        if abs(outD[0]) <= epsilon(T) && abs(outD[1]) <= epsilon(T) {
-            if abs(outD[2]) <= epsilon(T) {
+    if discr == 0.0 {
+        if outD[0] == 0.0 && outD[1] == 0.0 {
+            if outD[2] == 0.0 {
                 type = .Line
+                return
             }
             type = .Quadratic
-        } else {
-            type = .Cusp
+            return
         }
-    } else {
-        type = .Loop
+        type = .Cusp
+        return
     }
+    if discr > 0 {
+        type = .Serpentine
+        return
+    }
+    type = .Loop
     return
 }
 
@@ -212,15 +174,14 @@ LineSplitLine :: proc "contextless" (pts:[2][$N]$T, t:T) -> (outPts1:[2][N]T, ou
 }
 
 @(private="file") _Shapes_ComputeLine :: proc(
-    poly:^[dynamic]PointF,
     vertList:^[dynamic]ShapeVertex2D,
     indList:^[dynamic]u32,
+    outPoly:^[dynamic]CurveStruct,
+    color:Point3DwF,
     pts:[]PointF,
     type:CurveType,
-    color:Point3DwF,
-    _reverse := false,
     _subdiv :f32 = 0.0,
-    _repeat := false) -> ShapesError {
+    _repeat :int = -1) -> ShapesError {
 
     if _subdiv < 0 do panicLog("_subdiv can't negative.")
 
@@ -236,41 +197,60 @@ LineSplitLine :: proc "contextless" (pts:[2][$N]$T, t:T) -> (outPts1:[2][N]T, ou
     if curveType != .Line && curveType != .Quadratic {
         curveType, err, outD = GetCubicCurveType(pts[0], pts[1], pts[2], pts[3])
         if err != .None do return err
-    } else if curveType == .Quadratic && _subdiv == 0.0 {
-        non_zero_append(poly, pts[0])
+    } else if curveType == .Quadratic {
+        if _subdiv == 0.0 {
+            vlen :u32 = u32(len(vertList))
+            if GetPolygonOrientation(pts) == .CounterClockwise {
+                non_zero_append(vertList, ShapeVertex2D{
+                    uvw = {0,0,0},
+                    pos = pts[0],
+                    color = color,
+                })
+                non_zero_append(vertList, ShapeVertex2D{
+                    uvw = {-0.5,0,0.5},
+                    pos = pts[1],
+                    color = color,
+                })
+                non_zero_append(vertList, ShapeVertex2D{
+                    uvw = {-1,-1,1},
+                    pos = pts[2],
+                    color = color,
+                })
+            } else {
+                non_zero_append(vertList, ShapeVertex2D{
+                    uvw = {0,0,0},
+                    pos = pts[0],
+                    color = color,
+                })
+                non_zero_append(vertList, ShapeVertex2D{
+                    uvw = {0.5,0,0.5},
+                    pos = pts[1],
+                    color = color,
+                })
+                non_zero_append(vertList, ShapeVertex2D{
+                    uvw = {1,1,1},
+                    pos = pts[2],
+                    color = color,
+                })
+            }
+    
+            non_zero_append(indList, vlen, vlen + 1, vlen + 2)
+    
+            non_zero_append(outPoly, CurveStruct{pts[0], false}, CurveStruct{pts[1], true})
+        } else {
+            x01 := (pts[1].x - pts[0].x) * _subdiv + pts[0].x
+            y01 := (pts[1].y - pts[0].y) * _subdiv + pts[0].y
+            x12 := (pts[2].x - pts[1].x) * _subdiv + pts[1].x
+            y12 := (pts[2].y - pts[1].y) * _subdiv + pts[1].y
 
-        if PointLineLeftOrRight(pts[1], pts[0], pts[2]) > 0 {
-            non_zero_append(poly, pts[1])
+            x012 := (x12 - x01) * _subdiv + x01
+            y012 := (y12 - y01) * _subdiv + y01
+
+            err := _Shapes_ComputeLine(vertList, indList, outPoly, color,{pts[0], { x01, y01 }, { x012, y012 }}, .Quadratic, 0.0, 0)
+            if err != .None do return err
+            err = _Shapes_ComputeLine(vertList, indList, outPoly, color,{{ x012, y012 }, { x12, y12 }, pts[2]}, .Quadratic,0.0, 0)
+            if err != .None do return err
         }
-
-        vlen :u32 = u32(len(vertList))
-        non_zero_append(vertList, ShapeVertex2D{
-            uvw = {0,0,0},
-            color = color,
-            pos = pts[0],
-        })
-        non_zero_append(vertList, ShapeVertex2D{
-            uvw = {-0.5,0,0.5},
-            color = color,
-            pos = pts[1],
-        })
-        non_zero_append(vertList, ShapeVertex2D{
-            uvw = {-1,-1,1},
-            color = color,
-            pos = pts[2],
-        })
-        if _reverse {
-            vertList[vlen].uvw.x *= -1
-            vertList[vlen + 1].uvw.x *= -1
-            vertList[vlen + 2].uvw.x *= -1
-
-            vertList[vlen].uvw.y *= -1
-            vertList[vlen + 1].uvw.y *= -1
-            vertList[vlen + 2].uvw.y *= -1
-        }
-
-        non_zero_append(indList, vlen, vlen + 1, vlen + 2)
-       
         return .None
     }
 
@@ -284,24 +264,22 @@ LineSplitLine :: proc "contextless" (pts:[2][$N]$T, t:T) -> (outPts1:[2][N]T, ou
             -F[3,0], -F[3,1], F[3,2], F[3,3],
         }
     }
-    repeat := false
+    repeat := 0
     subdiv :f32 = 0.0
-
-    if curveType == .Line {
-        non_zero_append(poly, pts[0])
-        return .None
-    }
 
     if _subdiv == 0.0 {
         switch curveType {
             case .Line:
+                non_zero_append(outPoly, CurveStruct{pts[0], false})
+                return .None
             case .Quadratic:
                 F = {
                     0,              0,              0,          0,
-                    -1.0/3.0,       0,              1.0/3.0,    0,
-                    -2.0/3.0,       -1.0/3.0,       2.0/3.0,    0,
-                    -1,             -1,             1,          1,
+                    1.0/3.0,       0,              1.0/3.0,    0,
+                    2.0/3.0,       1.0/3.0,       2.0/3.0,    0,
+                    1,             1,             1,          1,
                 }
+                if outD[2] < 0 do reverse = true
             case .Serpentine:
                 t1 := math.sqrt_f32(9.0 * outD[1] * outD[1] - 12 * outD[0] * outD[2])
                 ls := 3.0 * outD[1] - t1
@@ -318,7 +296,7 @@ LineSplitLine :: proc "contextless" (pts:[2][$N]$T, t:T) -> (outPts1:[2][N]T, ou
                     ltMinusLs * mtMinusMs,                                              -(ltMinusLs * ltMinusLs * ltMinusLs),   -(mtMinusMs * mtMinusMs * mtMinusMs),   1,
                 }
     
-                if F[0,0] > 0.0 do reverse = true
+                if outD[0] < 0.0 do reverse = true
             case .Loop:
                 t1 := math.sqrt_f32(4 * outD[0] * outD[2] - 3 * outD[1] * outD[1])
                 ls := outD[1] - t1
@@ -329,11 +307,11 @@ LineSplitLine :: proc "contextless" (pts:[2][$N]$T, t:T) -> (outPts1:[2][N]T, ou
                 ql := ls / lt
                 qm := ms / mt
                
-                if !_repeat && 0.0 < ql && ql < 1.0 {
-                    repeat = true
+                if _repeat == -1 && 0.0 < ql && ql < 1.0 {
+                    repeat = 1
                     subdiv = ql
-                } else if !_repeat && 0.0 < qm && qm < 1.0 {
-                    repeat = true
+                } else if _repeat == -1 && 0.0 < qm && qm < 1.0 {
+                    repeat = 2
                     subdiv = qm
                 } else {
                     ltMinusLs := lt - ls
@@ -350,7 +328,7 @@ LineSplitLine :: proc "contextless" (pts:[2][$N]$T, t:T) -> (outPts1:[2][N]T, ou
                         ltMinusLs * mtMinusMs,  -(ltMinusLs * ltMinusLs) * mtMinusMs,   -ltMinusLs * mtMinusMs * mtMinusMs, 1,
                     }
           
-                    reverse = F[1, 0] > 0
+                    reverse = (outD[0] > 0.0 && F[0,0] < 0.0) || (outD[0] < 0.0 && F[0,0] > 0.0)
                 }
             case .Cusp:
                 ls := outD[2]
@@ -362,15 +340,15 @@ LineSplitLine :: proc "contextless" (pts:[2][$N]$T, t:T) -> (outPts1:[2][N]T, ou
                     ls - (2.0 / 3.0) * lt,      lsMinusLt * lsMinusLt * ls,         1,  0,
                     lsMinusLt,                  lsMinusLt * lsMinusLt * lsMinusLt,  1,  1,
                 }
-                reverse = true
+                //reverse = true
             case .Unknown:
                 panicLog("GetCubicCurveType: unknown curve type")
         }
     }
    
 
-    if repeat || _subdiv != 0.0 {
-        //TODO Quadratic
+    if repeat > 0 || _subdiv != 0.0 {
+        //!X no need Quadratic
         if subdiv == 0.0 {
             subdiv = _subdiv
         }
@@ -391,39 +369,40 @@ LineSplitLine :: proc "contextless" (pts:[2][$N]$T, t:T) -> (outPts1:[2][N]T, ou
         x0123 := (x123 - x012) * subdiv + x012
         y0123 := (y123 - y012) * subdiv + y012
 
-        // non_zero_append(indList, u32(len(vertList)))
-        // non_zero_append(indList, u32(len(vertList)) + 1)
-        // non_zero_append(indList, u32(len(vertList)) + 2)
-
-        // non_zero_append(vertList, ShapeVertex2D{
-        //     uvw = {1, 0, 0},
-        //     color = color,
-        //     pos = pts[0],
-        // })
-        // non_zero_append(vertList, ShapeVertex2D{
-        //     uvw = {1, 0, 0},
-        //     color = color,
-        //     pos = PointF{x0123, y0123 },
-        // })
-        // non_zero_append(vertList, ShapeVertex2D{
-        //     uvw = {1, 0, 0},
-        //     color = color,
-        //     pos = pts[3],
-        // })
-
-        err := _Shapes_ComputeLine(poly, vertList, indList, {pts[0], { x01, y01 }, { x012, y012 }, { x0123, y0123 }}, type, color, _reverse, 0.0, true)
-        if err != .None do return err
-        err = _Shapes_ComputeLine(poly, vertList, indList, {{ x0123, y0123 }, { x123, y123 }, { x23, y23 }, pts[3]}, type, color, _reverse, 0.0, true)
-        if err != .None do return err
-
+        if repeat == 2 {
+            err := _Shapes_ComputeLine(vertList, indList, outPoly, color,{pts[0], { x01, y01 }, { x012, y012 }, { x0123, y0123 }}, type, 0.0, 1)
+            if err != .None do return err
+            err = _Shapes_ComputeLine(vertList, indList, outPoly, color,{{ x0123, y0123 }, { x123, y123 }, { x23, y23 }, pts[3]}, type, 0.0, 0)
+            if err != .None do return err
+        } else if repeat == 1 {
+            err := _Shapes_ComputeLine(vertList, indList, outPoly, color,{pts[0], { x01, y01 }, { x012, y012 }, { x0123, y0123 }}, type, 0.0, 0)
+            if err != .None do return err
+            err = _Shapes_ComputeLine(vertList, indList, outPoly, color,{{ x0123, y0123 }, { x123, y123 }, { x23, y23 }, pts[3]}, type, 0.0, 1)
+            if err != .None do return err
+        } else {
+            if _repeat == 3 {
+                err := _Shapes_ComputeLine(vertList, indList, outPoly, color,{pts[0], { x01, y01 }, { x012, y012 }, { x0123, y0123 }}, type, 0.0, 0)
+                if err != .None do return err
+                err = _Shapes_ComputeLine(vertList, indList, outPoly, color,{{ x0123, y0123 }, { x123, y123 }, { x23, y23 }, pts[3]}, type, 0.0, 0)
+                if err != .None do return err
+            } else {
+                err := _Shapes_ComputeLine(vertList, indList, outPoly, color,{pts[0], { x01, y01 }, { x012, y012 }, { x0123, y0123 }}, type, 0.5, 3)
+                if err != .None do return err
+                err = _Shapes_ComputeLine(vertList, indList, outPoly, color,{{ x0123, y0123 }, { x123, y123 }, { x23, y23 }, pts[3]}, type, 0.5, 3)
+                if err != .None do return err
+            }
+        }
         return .None
     }
-
-    if reverse != _reverse {
-        F = reverseOrientation(F)
+    if repeat == 1 {
+        reverse = !reverse
     }
 
-    appendLine :: proc (poly:^[dynamic]PointF, vertList:^[dynamic]ShapeVertex2D, indList:^[dynamic]u32, pts:[]PointF, F:matrix[4,4]f32, color:Point3DwF) {
+    if reverse {
+      F = reverseOrientation(F)
+    }
+
+    appendLine :: proc (vertList:^[dynamic]ShapeVertex2D, indList:^[dynamic]u32, color:Point3DwF, pts:[]PointF, F:matrix[4,4]f32) {
         if len(pts) == 2 {
             return
         }
@@ -487,46 +466,25 @@ LineSplitLine :: proc "contextless" (pts:[2][$N]$T, t:T) -> (outPts1:[2][N]T, ou
                     non_zero_append(indList, indices[(k + 1)%3])
                     non_zero_append(indList, start + i)
                 }
-                if i == 1 {
-                    if PointLineLeftOrRight(pts[2], pts[0], pts[3]) > 0 {
-                        non_zero_append(poly, pts[1])
-                    }
-                } else if i == 2 {
-                    if PointLineLeftOrRight(pts[1], pts[0], pts[3]) > 0 {
-                        non_zero_append(poly, pts[1])
-                    }
-                }
                 return
             }
         }
 
-        b, _ := LinesIntersect(vertList[start].pos, vertList[start + 2].pos, vertList[start + 1].pos, vertList[start + 3].pos)
+        b := LinesIntersect(vertList[start].pos, vertList[start + 2].pos, vertList[start + 1].pos, vertList[start + 3].pos)
         if b {
             if linalg.length2(vertList[start + 2].pos - vertList[start].pos) < linalg.length2(vertList[start + 3].pos - vertList[start + 1].pos) {
                 non_zero_append(indList, start, start + 1, start + 2, start, start + 2, start + 3)
             } else {
                 non_zero_append(indList, start, start + 1, start + 3, start + 1, start + 2, start + 3)
             }
-            if PointLineLeftOrRight(pts[1], pts[0], pts[3]) > 0 {
-                non_zero_append(poly, pts[1])
-            }
-            if PointLineLeftOrRight(pts[2], pts[0], pts[3]) > 0 {
-                non_zero_append(poly, pts[2])
-            }
             return
         }
-        b, _ = LinesIntersect(vertList[start].pos, vertList[start + 3].pos, vertList[start + 1].pos, vertList[start + 2].pos)
+        b = LinesIntersect(vertList[start].pos, vertList[start + 3].pos, vertList[start + 1].pos, vertList[start + 2].pos)
         if b {
             if linalg.length2(vertList[start + 3].pos - vertList[start].pos) < linalg.length2(vertList[start + 2].pos - vertList[start + 1].pos) {
                 non_zero_append(indList, start, start + 1, start + 3, start, start + 3, start + 2)
             } else {
                 non_zero_append(indList, start, start + 1, start + 2, start + 2, start + 1, start + 3)
-            }
-            if PointLineLeftOrRight(pts[1], pts[0], pts[3]) > 0 {
-                non_zero_append(poly, pts[1])
-            }
-            if PointLineLeftOrRight(pts[2], pts[0], pts[3]) > 0 {
-                non_zero_append(poly, pts[2])
             }
             return
         }
@@ -535,156 +493,146 @@ LineSplitLine :: proc "contextless" (pts:[2][$N]$T, t:T) -> (outPts1:[2][N]T, ou
         } else {
             non_zero_append(indList, start, start + 2, start + 3, start + 3, start + 2, start + 1)
         }
-        //TODO
     }
-    non_zero_append(poly, pts[0])
-    appendLine(poly, vertList, indList, pts_[:len(pts)], F, color)
+    appendLine(vertList, indList, color,pts_[:len(pts)], F)
+
+    if len(pts) == 3 {
+        non_zero_append(outPoly, CurveStruct{pts[0], false}, CurveStruct{pts[1], true})
+    } else {
+        non_zero_append(outPoly, CurveStruct{pts[0], false}, CurveStruct{pts[1], true}, CurveStruct{pts[2], true})
+    }
 
     return .None
 }
 
+@(private="file") CurveStruct :: struct {
+    p:PointF,
+    isCurve:bool,
+}
 
+//TODO Stroke
 Shapes_ComputePolygon :: proc(poly:^Shapes, allocator := context.allocator) -> (res:^RawShape = nil, err:ShapesError = .None) {
     vertList:[dynamic]ShapeVertex2D = make_non_zeroed_dynamic_array([dynamic]ShapeVertex2D, allocator)
+    indList:[dynamic]u32 = make_non_zeroed_dynamic_array([dynamic]u32, allocator)
+    outPoly:[][dynamic]CurveStruct = make_non_zeroed_slice([][dynamic]CurveStruct, len(poly.nPolys), context.temp_allocator)
+    outPoly2:[dynamic]PointF = make_non_zeroed_dynamic_array([dynamic]PointF, context.temp_allocator)
+    outPoly2N:[]u32 = make_non_zeroed_slice([]u32, len(poly.nPolys), context.temp_allocator)
+    for &o in outPoly {
+        o = make_non_zeroed_dynamic_array([dynamic]CurveStruct, context.temp_allocator)
+    }
 
-    indList:[dynamic]u32 = make_non_zeroed_dynamic_array([dynamic]u32, context.temp_allocator)
-    polyT:[dynamic]PointF = make_non_zeroed_dynamic_array([dynamic]PointF, context.temp_allocator)
-    //polyT1:[dynamic]PointF = make_non_zeroed_dynamic_array([dynamic]PointF, context.temp_allocator)
-    //polyT2:[dynamic]PointF = make_non_zeroed_dynamic_array([dynamic]PointF, context.temp_allocator)
-    nPolysT:[dynamic]u32 = make_non_zeroed_dynamic_array([dynamic]u32, context.temp_allocator)
     defer {
-        delete(indList)
-        delete(polyT)
-        delete(nPolysT)
-        //delete(polyT2)
-        //delete(polyT1)
+        for o in outPoly {
+            delete(o)
+        }
+        delete(outPoly, context.temp_allocator)
+        delete(outPoly2)
+        delete(outPoly2N, context.temp_allocator)
     }
 
     res = new_non_zeroed(RawShape, allocator)
     defer if err != .None {
         delete(vertList)
+        delete(indList)
         free(res, allocator)
         res = nil
     }
 
     start :u32 = 0
-    ns :u32 = 0
-    polyLen :u32 = u32(len(poly.poly))
     typeIdx :u32 = 0
-    for n,i in poly.nPolys {
-        //clear(&polyT2)
-        //clear(&polyT1)
 
-        rev := GetPolygonOrientation(poly.poly[start:start+n]) == .Clockwise ? true : false
-
-        for i:u32 = start; i < start+n; typeIdx += 1 {
-            SPLIT_CURVE :: proc "contextless" (poly:[]PointF, pts:[$N]PointF, start:u32) -> f32 {
-                for p, i in poly {
-                    if !(u32(i) >= start && u32(i) < start + u32(N)) {
-                        when N == 3 {
-                            if PointInTriangle(p, pts[0], pts[1], pts[2]) {
-                                // t := PointDeltaInLine(p, pts[0], pts[2])
-                                // assert_contextless(t >= 0.0 && t <= 1.0)
-                                return 0.5
-                            }
-                        } else when N == 4 {
-                           // res, _ := LinesIntersect(pts[0], pts[2], pts[1], pts[3])
-                          //  if res {
-                                if PointInPolygon(p, []PointF{pts[0], pts[1], pts[2], pts[3]}) {
-                                    // t := PointDeltaInLine(p, pts[0], pts[3])
-                                    // assert_contextless(t >= 0.0 && t <= 1.0)
-                                    return 0.5
-                                }
-                            //}
-                        } else {
-                            #assert(N == 3 || N == 4)
-                        }
-                    } 
-                }
-                return 0.0
-            }
-            if poly.types[typeIdx] == .Line {
-                if poly.colors != nil && poly.colors[i].a > 0 {
-                    non_zero_append(&polyT, poly.poly[i])
-                }
-                if poly.strokeColors != nil && poly.strokeColors[i].a > 0 && poly.thickness[i] > 0 {
-                    //TODO
-                }
-                i += 1
-            } else if poly.types[typeIdx] == .Quadratic {
-                pts := [3]PointF{poly.poly[i], poly.poly[i+1], i + 2 == u32(len(poly.poly)) ? poly.poly[start] : poly.poly[i+2]}
-                subdiv := !rev ? SPLIT_CURVE(poly.poly, pts, i) : 0.0
-                if poly.colors != nil && poly.colors[i].a > 0 {
-                    err = _Shapes_ComputeLine(&polyT,
+    for n,e in poly.nPolys {
+        if poly.colors != nil && poly.colors[e].a > 0 {
+            for i:u32 = start; i < start+n; typeIdx += 1 {
+                if poly.types[typeIdx] == .Line {
+                    non_zero_append(&outPoly[e], CurveStruct{poly.poly[i], false})
+                    i += 1
+                } else if poly.types[typeIdx] == .Quadratic {
+                    pts := [3]PointF{poly.poly[i], poly.poly[i+1], i + 2 == start+n ? poly.poly[start] : poly.poly[i+2]}
+                    err = _Shapes_ComputeLine(
                         &vertList,
                         &indList,
+                        &outPoly[e],
+                        poly.colors[e],
                         pts[:],
-                        .Quadratic,
-                        poly.colors[i],
-                        rev,
-                        subdiv,)
+                        .Quadratic, 0.5)
                     if err != .None do return
-                }
-                if poly.strokeColors != nil && poly.strokeColors[i].a > 0 && poly.thickness[i] > 0 {
-                   //TODO
-                }
-                i += 2
-            } else {
-                pts := [4]PointF{poly.poly[i], poly.poly[i+1], poly.poly[i+2], i + 3 == u32(len(poly.poly)) ? poly.poly[start] : poly.poly[i+3]}
-                subdiv := !rev ? SPLIT_CURVE(poly.poly, pts, i) : 0.0
-                assert(subdiv >= 0.0 && subdiv <= 1.0)
-                if poly.colors != nil && poly.colors[i].a > 0 {
-                    err = _Shapes_ComputeLine(&polyT,
+                    i += 2
+                } else {
+                    pts := [4]PointF{poly.poly[i], poly.poly[i+1], poly.poly[i+2], i + 3 == start+n ? poly.poly[start] : poly.poly[i+3]}
+                    err = _Shapes_ComputeLine(
                         &vertList,
                         &indList,
+                        &outPoly[e],
+                        poly.colors[e],
                         pts[:],
-                        .Unknown,
-                        poly.colors[i],
-                        rev,
-                        subdiv)
+                        .Unknown, 0.5)//TODO 일단은 0.5로 고정
                     if err != .None do return
+                    i += 3
                 }
-                if poly.strokeColors != nil && poly.strokeColors[i].a > 0 && poly.thickness[i] > 0 {
-                    //TODO
-                }
-                i += 3
             }
+        } else {
+            typeIdx += poly.nTypes[e]
         }
-        non_zero_append(&nPolysT, u32(len(polyT)) - ns)
-        // if len(polyT1) > 0 {
-        //     non_zero_append(&polyT, ..polyT1[:])
-        //     non_zero_append(&nPolysT, auto_cast len(polyT1))
-        // }
-        // if len(polyT2) > 0 {
-        //     non_zero_append(&polyT, ..polyT2[:])
-        //     non_zero_append(&nPolysT, auto_cast len(polyT2))
-        // }
         start += n
-        ns = u32(len(polyT))
     }
 
-    res.indices = TrianguatePolygons(polyT[:], nPolysT[:], allocator)
+    for ps, psi in outPoly {
+        np :u32 = 0
+
+        pT := make_non_zeroed_dynamic_array([dynamic]PointF, context.temp_allocator)
+        defer delete(pT)
+        for p in ps {
+            if !p.isCurve {
+                non_zero_append(&pT, p.p)
+            }
+        }
+
+        if GetPolygonOrientation(pT[:]) == .Clockwise {
+            for p in ps {
+                non_zero_append(&outPoly2, p.p)
+                np += 1
+            }
+        } else {
+            for p,i in ps {
+                if p.isCurve {
+                    if PointInPolygon(p.p, pT[:]) {
+                        non_zero_append(&outPoly2, p.p)
+                        np += 1
+                    }
+                } else {
+                    non_zero_append(&outPoly2, p.p)
+                    np += 1
+                }
+            }
+        }
+
+        outPoly2N[psi] = np
+    }
+
+    res.indices = TrianguatePolygons(outPoly2[:], outPoly2N[:], allocator)
     defer if err != .None {
         delete(res.indices, allocator)
     }
     start = 0
     vLen :u32 = auto_cast len(vertList)//Existing Curve Vertices Length
-    for _, i in nPolysT {
-        for p in polyT[start:start+nPolysT[i]] {
+    for _, i in outPoly2N {
+        for idx in start..<start+outPoly2N[i] {
             non_zero_append(&vertList, ShapeVertex2D{
-                pos = p,
+                pos = outPoly2[idx],
                 uvw = {1,0,0},
                 color = poly.colors[i],
             })
         }
-        start += nPolysT[i]
-    }
-    for _, i in res.indices {
-        res.indices[i] += vLen
+        start += outPoly2N[i]
     }
     if len(indList) > 0 {
+        for _, i in res.indices {
+            res.indices[i] += vLen
+        }
+        oldLen := len(res.indices)
         res.indices = resize_non_zeroed_slice(res.indices, len(res.indices) + len(indList), allocator)
-        intrinsics.mem_copy_non_overlapping(&res.indices[len(res.indices) - len(indList)], &indList[0], len(indList) * size_of(u32))
+        intrinsics.mem_copy_non_overlapping(&res.indices[oldLen], &indList[0], len(indList) * size_of(u32))
     }
 
     shrink(&vertList)

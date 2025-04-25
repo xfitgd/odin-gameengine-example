@@ -779,8 +779,8 @@ import "base:intrinsics"
         panicLog("FlipScanEdgeEvent - null opposing point")
     }
 
-    p1 := Triangle_PointCCW(t, eq)
-    p2 := Triangle_PointCW(t, eq)
+    p1 := Triangle_PointCCW(flipTriangle, eq)
+    p2 := Triangle_PointCW(flipTriangle, eq)
     if p1 == nil || p2 == nil {
         panicLog("FlipScanEdgeEvent - null on either of points")
     }
@@ -809,7 +809,7 @@ import "base:intrinsics"
     return true
 }
 
-TrianguateSinglePolygon :: proc(poly:[]PointF, holes:[][]PointF = nil, allocator := context.allocator) -> (indices:[]u32) {
+TrianguateSinglePolygon :: proc(poly:[]PointF, baseIdx:[]u32, holes:[][]PointF = nil, allocator := context.allocator) -> (indices:[]u32) {
     ctx := TriangleCtx{allocator = allocator}
    
     if holes == nil {
@@ -845,11 +845,13 @@ TrianguateSinglePolygon :: proc(poly:[]PointF, holes:[][]PointF = nil, allocator
         delete(ctx.pts, context.temp_allocator)
         delete(ctx.ptsData, context.temp_allocator)
     }
+    _baseIdx := 0
 
     for p, i in poly {
-        ctx.ptsData[i] = PointE_Init(p, u32(i), context.temp_allocator)
-        ctx.pts[i] = &ctx.ptsData[i]
+        ctx.ptsData[i] = PointE_Init(p, u32(i) + baseIdx[_baseIdx], context.temp_allocator)
+        ctx.pts[i] = &ctx.ptsData[i] 
     }
+    _baseIdx += 1
 
     for _, i in poly {
         j := i < len(poly) - 1 ? i + 1 : 0
@@ -860,9 +862,10 @@ TrianguateSinglePolygon :: proc(poly:[]PointF, holes:[][]PointF = nil, allocator
         idx := len(poly)
         for hole in holes {
             for p, i in hole {
-                ctx.ptsData[idx + i] = PointE_Init(p, u32(idx + i), context.temp_allocator)
+                ctx.ptsData[idx + i] = PointE_Init(p, u32(i) + baseIdx[_baseIdx], context.temp_allocator)
                 ctx.pts[idx + i] = &ctx.ptsData[idx + i]
             }
+            _baseIdx += 1
         
             for _, i in hole {
                 j := i < len(hole) - 1 ? i + 1 : 0
@@ -888,8 +891,8 @@ TrianguateSinglePolygon :: proc(poly:[]PointF, holes:[][]PointF = nil, allocator
     dx:f32 = kAlpha * (ctx.xmax - ctx.xmin)
     dy:f32 = kAlpha * (ctx.ymax - ctx.ymin)
 
-    head :PointE = PointE_Init(PointF{ ctx.xmin - dx, ctx.ymin - dy }, u32(len(ctx.pts)), context.temp_allocator)
-    tail :PointE = PointE_Init(PointF{ ctx.xmax + dx, ctx.ymin - dy }, u32(len(ctx.pts) + 1), context.temp_allocator)
+    head :PointE = PointE_Init(PointF{ ctx.xmin - dx, ctx.ymin - dy }, max(u32), context.temp_allocator)//!not use id
+    tail :PointE = PointE_Init(PointF{ ctx.xmax + dx, ctx.ymin - dy }, max(u32), context.temp_allocator)
     defer {
         delete(head.edges)
         delete(tail.edges)
@@ -1025,7 +1028,7 @@ TrianguateSinglePolygon :: proc(poly:[]PointF, holes:[][]PointF = nil, allocator
 
     if (node.next != nil) && (node.next.next != nil) {
         angle := BasinAngle(node)
-        if angle < (3*math.PI/4) {
+        if angle < (3.0*math.PI/4.0) {
             FillBasin(ctx, node)
         }
     }
@@ -1147,12 +1150,12 @@ TrianguateSinglePolygon :: proc(poly:[]PointF, holes:[][]PointF = nil, allocator
   
 @(private = "file") AngleExceeds90Degrees :: proc "contextless" (origin, pa, pb: ^PointE) -> bool {
     angle := Angle(origin, pa, pb)
-    return (angle > (math.PI/2)) || (angle < -(math.PI/2))
+    return (angle > (math.PI/2.0)) || (angle < -(math.PI/2.0))
 }
   
 @(private = "file") AngleExceedsPlus90DegreesOrIsNegative :: proc "contextless" (origin, pa, pb: ^PointE) -> bool {
     angle := Angle(origin, pa, pb)
-    return (angle > (math.PI/2)) || (angle < 0)
+    return (angle > (math.PI/2.0)) || (angle < 0.0)
 }
   
 @(private = "file") Angle :: proc "contextless" (origin, pa, pb: ^PointE) -> f32 {
@@ -1197,8 +1200,7 @@ TrianguatePolygons :: proc(poly:[]PointF,  nPoly:[]u32, allocator := context.all
                     if isHole {
                         if PointInPolygon(poly[idx2], poly[idx:idx+nPoly[n]]) {
                             non_zero_append(&holes, poly[idx2:idx2+nPoly[n2]])
-                            non_zero_append(&holeIndices, idx2)
-                            
+                            non_zero_append(&holeIndices, idx2)  
                         }
                     }
                 }
@@ -1206,28 +1208,20 @@ TrianguatePolygons :: proc(poly:[]PointF,  nPoly:[]u32, allocator := context.all
             }
 
             if len(holes) == 0 {
-                indicesT := TrianguateSinglePolygon(poly[idx:idx+nPoly[n]], nil, allocator)
+                indicesT := TrianguateSinglePolygon(poly[idx:idx+nPoly[n]], {idx},nil, allocator)
                 defer delete(indicesT, allocator)
-              
-                for &id in indicesT {
-                    id += idx
-                }
-        
+
                 non_zero_append(&indices_, ..indicesT)
             } else {
-                indicesT := TrianguateSinglePolygon(poly[idx:idx+nPoly[n]], holes[:], allocator)
+                baseIdx := make_non_zeroed_slice([]u32, len(holeIndices) + 1, context.temp_allocator )
+                defer delete(baseIdx, context.temp_allocator )
+
+                baseIdx[0] = idx
+                intrinsics.mem_copy_non_overlapping(&baseIdx[1], &holeIndices[0], len(holeIndices) * size_of(u32))
+
+                indicesT := TrianguateSinglePolygon(poly[idx:idx+nPoly[n]], baseIdx,holes[:], allocator)
                 defer delete(indicesT, allocator)
-              
-                indx :u32 = 0
-                for ;indx < nPoly[n];indx += 1 {
-                    indicesT[indx] += idx
-                }
-                for _, i in holeIndices {
-                    for _,_ in holes[i] {
-                        indicesT[indx] += holeIndices[i]
-                        indx += 1
-                    }
-                }
+
                 non_zero_append(&indices_, ..indicesT)
             }
         }

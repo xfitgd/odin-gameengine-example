@@ -19,6 +19,12 @@ import vk "vendor:vulkan"
         cnt = 1,
     },
 }
+@rodata __singleStoragePoolSizes : [1]VkDescriptorPoolSize = {
+    {
+        type = .STORAGE,
+        cnt = 1,
+    },
+}
 @rodata __transformUniformPoolSizes : [2]VkDescriptorPoolSize = {
     {
         type = .UNIFORM,

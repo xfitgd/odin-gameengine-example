@@ -8,6 +8,7 @@ import "core:os"
 import "core:os/os2"
 import "core:strings"
 import "core:sys/linux"
+import "core:path/filepath"
 
 
 read_build_json :: proc() -> (json.Value, bool) {
@@ -79,50 +80,104 @@ main :: proc() {
 		}
 		//defer free_all(	context.temp_allocator)
 
-		r, w, err := os2.pipe()
-		if err != nil do panic("pipe")
+		if !findGLSLFileAndRunCmd() do return
 
-		p: os2.Process
-		p, err = os2.process_start(os2.Process_Desc{
-			command = {"odin", "build", 
-			setting["main-package-path"].(json.String), 
-			"-no-bounds-check" if !debug else ({}),
-			out_path, 
-			o, 
-			"-debug" if debug else ({}),
-			//"-sanitize:address" if debug else ({}),
-			({}) if !is_android else "-define:__ANDROID__=true"},
-			stdout  = w,
-			stderr  = w,
-		})
-		os2.close(w)
-	
-		output, err2 := os2.read_entire_file_from_file(r, context.temp_allocator)
-		if err2 != nil do fmt.panicf("read_entire_file_from_file %v", err)
-
-		
-		if err != nil {
-			fmt.eprint(string(output))
-			fmt.panicf("%v", err)
-		} else {
-			state:os2.Process_State
-			state, err = os2.process_wait(p)
-
-			if state.exit_code != 0 {
-				fmt.eprint(string(output))
-
-				os2.close(r)
-				_ = os2.process_close(p)
-				os.exit(-1)
-			}
-
-			fmt.print(string(output))
-			if err != nil do panic("process_wait")
+		if !runCmd({"odin", "build", 
+		setting["main-package-path"].(json.String), 
+		"-no-bounds-check" if !debug else ({}),
+		out_path, 
+		o, 
+		"-debug" if debug else ({}),
+		//"-sanitize:address" if debug else ({}),
+		({}) if !is_android else "-define:__ANDROID__=true"}) {
+			return
 		}
-		_ = os2.process_close(p)
-		os2.close(r)
 
 		if is_android {
 		}
 	}
+}
+
+findGLSLFileAndRunCmd :: proc() -> bool {
+	dir, err := os2.open("./xfit/shaders")
+	if err != nil {
+		fmt.panicf("findGLSLFiles open ERR : %s", err)
+	}
+	defer os2.close(dir)
+
+
+	files, readErr := os2.read_dir(dir, 0, context.allocator)
+	if readErr != nil {
+		fmt.panicf("findGLSLFiles read_dir ERR : %s", readErr)
+	}
+
+	defer delete(files)
+	for file in files {
+		if file.type != .Regular do continue
+
+		ext := filepath.ext(file.name)
+
+		glslExts := []string{
+			".glsl", ".vert", ".frag", ".geom", ".comp", 
+			".tesc", ".tese", ".rgen", ".rint", ".rahit", 
+			".rchit", ".rmiss", ".rcall"
+		}
+
+		for vExt in glslExts {
+			if strings.compare(ext, vExt) == 0 {
+				spvFile := strings.concatenate({"./xfit/shaders/", file.name, ".spv"})
+				glslFile := strings.concatenate({"./xfit/shaders/", file.name})
+				defer delete(spvFile)
+				defer delete(glslFile)
+
+				if !runCmd({"glslc", glslFile, "-O", "-o", spvFile}) do return false
+				break
+			}
+		}
+	}
+
+	return true
+}
+
+runCmd :: proc(cmd:[]string) -> bool {
+	r, w, err := os2.pipe()
+	if err != nil do panic("pipe")
+
+	p: os2.Process
+	p, err = os2.process_start(os2.Process_Desc{
+		command = cmd,
+		stdout  = w,
+		stderr  = w,
+	})
+	os2.close(w)
+
+	output, err2 := os2.read_entire_file_from_file(r, context.temp_allocator)
+	if err2 != nil do fmt.panicf("read_entire_file_from_file %v", err)
+
+	
+	if err != nil {
+		fmt.eprint(string(output), err)
+
+		os2.close(r)
+		_ = os2.process_close(p)
+		return false
+		//fmt.panicf("%v", err)
+	} else {
+		state:os2.Process_State
+		state, err = os2.process_wait(p)
+
+		if state.exit_code != 0 {
+			fmt.eprint(string(output))
+
+			os2.close(r)
+			_ = os2.process_close(p)
+			return false
+		}
+
+		fmt.print(string(output))
+		if err != nil do panic("process_wait")
+	}
+	_ = os2.process_close(p)
+
+	return true
 }
