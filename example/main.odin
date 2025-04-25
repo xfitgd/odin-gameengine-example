@@ -45,6 +45,7 @@ Init ::proc() {
         scale = xfit.PointF{3,3},
     }
 
+    //안녕하세요, 반갑습니다.\n안녕히가세요.
     rawText := xfit.Font_RenderString(font, "안녕하세요, 반갑습니다.\n안녕히가세요.", renderOpt)
     defer xfit.RawShape_Free(rawText)
 
@@ -53,7 +54,7 @@ Init ::proc() {
     xfit.Camera_Init(&camera, )
     xfit.Projection_InitMatrixOrthoWindow(&proj, CANVAS_W, CANVAS_H)
 
-    xfit.Shape_Init(shape, xfit.Shape, &shapeSrc, {-600, 0, 0}, 0, {10, 10}, &camera, &proj)
+    xfit.Shape_Init(shape, xfit.Shape, &shapeSrc, {-600, 0, 0}, 0, {3, 3}, &camera, &proj)
 
     xfit.RenderCmd_AddObject(renderCmd, shape)
     

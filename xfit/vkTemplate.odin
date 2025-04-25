@@ -357,7 +357,7 @@ vkDefaultPipelineDepthStencilStateCreateInfo := vkPipelineDepthStencilStateCreat
 @(require_results) vkPipelineMultisampleStateCreateInfoInit :: proc "contextless"(
 	rasterizationSamples:  vk.SampleCountFlags = {._1},
 	sampleShadingEnable:   b32 = true,
-	minSampleShading:      f32 = 0,
+	minSampleShading:      f32 = 1.0,
 	pSampleMask:           ^vk.SampleMask = nil,
 	alphaToCoverageEnable: b32 = false,
 	alphaToOneEnable:      b32 = false,

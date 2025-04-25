@@ -141,7 +141,22 @@ vkCopyScreenPipeline: vk.Pipeline
 vkCmdPool:vk.CommandPool
 vkCmdBuffer:[MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer
 
-vkPipelineX4MultisampleStateCreateInfo := vkPipelineMultisampleStateCreateInfoInit({._4}, sampleShadingEnable = false,)
+when vkMSAACount == 4 {
+	vkSampleCountFlags :: vk.SampleCountFlags{._4}
+} else when vkMSAACount == 8 {
+	vkSampleCountFlags :: vk.SampleCountFlags{._8}
+} else when vkMSAACount == 1 {
+	vkSampleCountFlags :: vk.SampleCountFlags{._1}
+} else {
+	#assert("invalid vkMSAACount")
+}
+
+when vkMSAACount == 1 {
+	vkPipelineMultisampleStateCreateInfo := vkPipelineMultisampleStateCreateInfoInit(vkSampleCountFlags, sampleShadingEnable = false, minSampleShading = 0.0)
+} else {
+	vkPipelineMultisampleStateCreateInfo := vkPipelineMultisampleStateCreateInfoInit(vkSampleCountFlags, sampleShadingEnable = true, minSampleShading = 1.0)	
+}
+
 @(private="file") __vkColorAlphaBlendingExternalState := [1]vk.PipelineColorBlendAttachmentState{vkPipelineColorBlendAttachmentStateInit(
 	srcColorBlendFactor = vk.BlendFactor.SRC_ALPHA,
 	dstColorBlendFactor = vk.BlendFactor.ONE_MINUS_SRC_ALPHA,
@@ -298,7 +313,7 @@ vkInitPipelines :: proc() {
 			stages = shapeWireShaderStages[:],
 			layout = vkShapePipelineLayout,
 			renderPass = vkRenderPass,
-			pMultisampleState = &vkPipelineX4MultisampleStateCreateInfo,
+			pMultisampleState = &vkPipelineMultisampleStateCreateInfo,
 			pDepthStencilState = &defaultDepthStencilState,
 			pColorBlendState = &vkDefaultPipelineColorBlendStateCreateInfo,
 			pVertexInputState = &shapeVertexInputState,
@@ -310,7 +325,7 @@ vkInitPipelines :: proc() {
 			stages = shapeShaderStages[:],
 			layout = vkShapePipelineLayout,
 			renderPass = vkRenderPass,
-			pMultisampleState = &vkPipelineX4MultisampleStateCreateInfo,
+			pMultisampleState = &vkPipelineMultisampleStateCreateInfo,
 			pDepthStencilState = &defaultDepthStencilState,
 			pColorBlendState = &vkDefaultPipelineColorBlendStateCreateInfo,
 			pVertexInputState = &shapeVertexInputState,
@@ -322,7 +337,7 @@ vkInitPipelines :: proc() {
 		stages = texShaderStages[:],
 		layout = vkTexPipelineLayout,
 		renderPass = vkRenderPass,
-		pMultisampleState = &vkPipelineX4MultisampleStateCreateInfo,
+		pMultisampleState = &vkPipelineMultisampleStateCreateInfo,
 		pDepthStencilState = &defaultDepthStencilState,
 		pColorBlendState = &vkDefaultPipelineColorBlendStateCreateInfo,
 		pViewportState = &viewportState,
@@ -331,7 +346,7 @@ vkInitPipelines :: proc() {
 		stages = animateTexShaderStages[:],
 		layout = vkAnimateTexPipelineLayout,
 		renderPass = vkRenderPass,
-		pMultisampleState = &vkPipelineX4MultisampleStateCreateInfo,
+		pMultisampleState = &vkPipelineMultisampleStateCreateInfo,
 		pDepthStencilState = &defaultDepthStencilState,
 		pColorBlendState = &vkDefaultPipelineColorBlendStateCreateInfo,
 		pViewportState = &viewportState,
@@ -623,7 +638,9 @@ vkCreateSwapChainAndImageViews :: proc() {
 	vkFrameBufferImageViews = make_non_zeroed([]vk.ImageView, __swapImgCnt)
 	
 	Texture_InitDepthStencil(&vkFrameDepthStencilTexture, vkExtent_rotation.width, vkExtent_rotation.height)
-	Texture_InitMSAA(&vkMSAAFrameTexture, vkExtent_rotation.width, vkExtent_rotation.height)
+	when vkMSAACount > 1 {
+		Texture_InitMSAA(&vkMSAAFrameTexture, vkExtent_rotation.width, vkExtent_rotation.height)
+	}
 
 	vkRefreshPreMatrix()
 	vkOpExecute(true)
@@ -651,14 +668,26 @@ vkCreateSwapChainAndImageViews :: proc() {
 		res = vk.CreateImageView(vkDevice, &imageViewCreateInfo, nil, &vkFrameBufferImageViews[i])
 		if res != .SUCCESS do panicLog("res = vk.CreateImageView(vkDevice, &imageViewCreateInfo, nil, &vkFrameBufferImageViews[i]) : ", res)
 
-		frameBufferCreateInfo := vk.FramebufferCreateInfo{
-			sType = vk.StructureType.FRAMEBUFFER_CREATE_INFO,
-			renderPass = vkRenderPass,
-			attachmentCount = 3,
-			pAttachments = &([]vk.ImageView{vkMSAAFrameTexture.__in.texture.imgView, vkFrameDepthStencilTexture.__in.texture.imgView, vkFrameBufferImageViews[i]})[0],
-			width = vkExtent.width,
-			height = vkExtent.height,
-			layers = 1,
+		when vkMSAACount == 1 {
+			frameBufferCreateInfo := vk.FramebufferCreateInfo{
+				sType = vk.StructureType.FRAMEBUFFER_CREATE_INFO,
+				renderPass = vkRenderPass,
+				attachmentCount = 2,
+				pAttachments = &([]vk.ImageView{vkFrameBufferImageViews[i], vkFrameDepthStencilTexture.__in.texture.imgView, })[0],
+				width = vkExtent.width,
+				height = vkExtent.height,
+				layers = 1,
+			}
+		} else {
+			frameBufferCreateInfo := vk.FramebufferCreateInfo{
+				sType = vk.StructureType.FRAMEBUFFER_CREATE_INFO,
+				renderPass = vkRenderPass,
+				attachmentCount = 3,
+				pAttachments = &([]vk.ImageView{vkMSAAFrameTexture.__in.texture.imgView, vkFrameDepthStencilTexture.__in.texture.imgView, vkFrameBufferImageViews[i]})[0],
+				width = vkExtent.width,
+				height = vkExtent.height,
+				layers = 1,
+			}
 		}
 		res = vk.CreateFramebuffer(vkDevice, &frameBufferCreateInfo, nil, &vkFrameBuffers[i])
 		if res != .SUCCESS do panicLog("res = vk.CreateFramebuffer(vkDevice, &frameBufferCreateInfo, nil, &vkFrameBuffers[i]) : ", res)
@@ -966,21 +995,21 @@ vkStart :: proc() {
 		storeOp = .STORE,
 		initialLayout = .UNDEFINED,
 		finalLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-		samples = {vk.SampleCountFlag._4},
+		samples = vkSampleCountFlags,
 	)
 	// depthAttachmentSampleClear := vkAttachmentDescriptionInit(
 	// 	format = vkDepthFmt,
 	// 	loadOp = .CLEAR,
 	// 	storeOp = .STORE,
 	// 	finalLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-	// 	samples = {vk.SampleCountFlag._4},
+	// 	samples = vkSampleCountFlags,
 	// )
 	// colorAttachmentSampleClear := vkAttachmentDescriptionInit(
 	// 	format = vkFmt.format,
 	// 	loadOp = .CLEAR,
 	// 	storeOp = .STORE,
 	// 	finalLayout = .COLOR_ATTACHMENT_OPTIMAL,
-	// 	samples = {vk.SampleCountFlag._4},
+	// 	samples = vkSampleCountFlags,
 	// )
 	colorAttachmentSample := vkAttachmentDescriptionInit(
 		format = vkFmt.format,
@@ -988,13 +1017,14 @@ vkStart :: proc() {
 		storeOp = .STORE,
 		initialLayout = .UNDEFINED,
 		finalLayout = .COLOR_ATTACHMENT_OPTIMAL,
-		samples = {vk.SampleCountFlag._4},
+		samples = vkSampleCountFlags,
 	)
 	colorAttachmentResolve := vkAttachmentDescriptionInit(
 		format = vkFmt.format,
 		storeOp = .STORE,
 		finalLayout = .PRESENT_SRC_KHR,
 	)
+
 	colorAttachmentLoadResolve := vkAttachmentDescriptionInit(
 		format = vkFmt.format,
 		loadOp = .LOAD,
@@ -1089,11 +1119,20 @@ vkStart :: proc() {
 		dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
 	}
 
-	renderPassInfo := vkRenderPassCreateInfoInit(
-		pAttachments = []vk.AttachmentDescription{colorAttachmentSample, depthAttachmentSample, colorAttachmentResolve},
-		pSubpasses = []vk.SubpassDescription{subpassResolveDesc},
-		pDependencies = []vk.SubpassDependency{subpassDependency},
-	)
+	when vkMSAACount == 1 {
+		renderPassInfo := vkRenderPassCreateInfoInit(
+			pAttachments = []vk.AttachmentDescription{colorAttachment, depthAttachment},
+			pSubpasses = []vk.SubpassDescription{subpassDesc},
+			pDependencies = []vk.SubpassDependency{subpassDependency},
+		)
+	} else {
+		renderPassInfo := vkRenderPassCreateInfoInit(
+			pAttachments = []vk.AttachmentDescription{colorAttachmentSample, depthAttachmentSample, colorAttachmentResolve},
+			pSubpasses = []vk.SubpassDescription{subpassResolveDesc},
+			pDependencies = []vk.SubpassDependency{subpassDependency},
+		)
+	}
+	
 	vk.CreateRenderPass(vkDevice, &renderPassInfo, nil, &vkRenderPass)
 
 
@@ -1480,7 +1519,9 @@ vkCleanSwapChain :: proc() {
 		}
 
 		Texture_Deinit(&vkFrameDepthStencilTexture)
-		Texture_Deinit(&vkMSAAFrameTexture)
+		when vkMSAACount > 1 {
+			Texture_Deinit(&vkMSAAFrameTexture)
+		}
 		vkOpExecute(true)
 
 		delete(vkFrameBuffers)
