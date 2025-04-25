@@ -53,7 +53,7 @@ Init ::proc() {
     xfit.Camera_Init(&camera, )
     xfit.Projection_InitMatrixOrthoWindow(&proj, CANVAS_W, CANVAS_H)
 
-    xfit.Shape_Init(shape, xfit.Shape, &shapeSrc, {-600, 0, 0}, 0, {1, 1}, &camera, &proj)
+    xfit.Shape_Init(shape, xfit.Shape, &shapeSrc, {-600, 0, 0}, 0, {10, 10}, &camera, &proj)
 
     xfit.RenderCmd_AddObject(renderCmd, shape)
     

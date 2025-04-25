@@ -1183,28 +1183,28 @@ Texture_Init :: proc(self:^Texture, #any_int width:int, #any_int height:int, pix
     VkUpdateDescriptorSets(mem.slice_ptr(&self.__in.set, 1))
 }
 
-//sampler nil default
-Texture_InitR8 :: proc(self:^Texture, #any_int width:int, #any_int height:int) {
-    xmem.ICheckInit_Init(&self.__in.checkInit)
-    self.__in.sampler = 0
-    self.__in.set.bindings = nil
-    self.__in.set.size = nil
-    self.__in.set.layout = 0
-    self.__in.set.__set = 0
+//sampler nil default //TODO
+// Texture_InitR8 :: proc(self:^Texture, #any_int width:int, #any_int height:int) {
+//     xmem.ICheckInit_Init(&self.__in.checkInit)
+//     self.__in.sampler = 0
+//     self.__in.set.bindings = nil
+//     self.__in.set.size = nil
+//     self.__in.set.layout = 0
+//     self.__in.set.__set = 0
 
-    VkBufferResource_CreateTexture(&self.__in.texture, {
-        width = auto_cast width,
-        height = auto_cast height,
-        useGCPUMem = false,
-        format = .R8Unorm,
-        samples = 1,
-        len = 1,
-        textureUsage = {.FRAME_BUFFER, .__INPUT_ATTACHMENT},
-        type = .TEX2D,
-        resourceUsage = .GPU,
-        single = true,
-    }, self.__in.sampler, nil)
-}
+//     VkBufferResource_CreateTexture(&self.__in.texture, {
+//         width = auto_cast width,
+//         height = auto_cast height,
+//         useGCPUMem = false,
+//         format = .R8Unorm,
+//         samples = 1,
+//         len = 1,
+//         textureUsage = {.FRAME_BUFFER, .__INPUT_ATTACHMENT},
+//         type = .TEX2D,
+//         resourceUsage = .GPU,
+//         single = true,
+//     }, self.__in.sampler, nil)
+// }
 
 
 Texture_InitDepthStencil :: proc(self:^Texture, #any_int width:int, #any_int height:int) {
@@ -1220,7 +1220,7 @@ Texture_InitDepthStencil :: proc(self:^Texture, #any_int width:int, #any_int hei
         height = auto_cast height,
         useGCPUMem = false,
         format = .DefaultDepth,
-        samples = 1,
+        samples = auto_cast vkMSAACount,
         len = 1,
         textureUsage = {.FRAME_BUFFER},
         type = .TEX2D,
@@ -1229,6 +1229,27 @@ Texture_InitDepthStencil :: proc(self:^Texture, #any_int width:int, #any_int hei
     }, self.__in.sampler, nil)
 }
 
+Texture_InitMSAA :: proc(self:^Texture, #any_int width:int, #any_int height:int) {
+    xmem.ICheckInit_Init(&self.__in.checkInit)
+    self.__in.sampler = 0
+    self.__in.set.bindings = nil
+    self.__in.set.size = nil
+    self.__in.set.layout = 0
+    self.__in.set.__set = 0
+
+    VkBufferResource_CreateTexture(&self.__in.texture, {
+        width = auto_cast width,
+        height = auto_cast height,
+        useGCPUMem = false,
+        format = .DefaultColor,
+        samples = auto_cast vkMSAACount,
+        len = 1,
+        textureUsage = {.FRAME_BUFFER,.__TRANSIENT_ATTACHMENT},
+        type = .TEX2D,
+        single = true,
+        resourceUsage = .GPU
+    }, self.__in.sampler, nil)
+}
 
 Texture_InitFile :: proc(self:^Texture, file:string, sampler:vk.Sampler = 0) {
     //TODO

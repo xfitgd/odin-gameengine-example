@@ -167,6 +167,9 @@ vkInitBlockLen :: proc() {
 		mainHeapIdx = 0
 	}
 
+
+	vkNonCoherentAtomSize = auto_cast vkPhysicalProp.limits.nonCoherentAtomSize
+
 	reduced := false
 	for t, i in vkPhysicalMemProp.memoryTypes[:vkPhysicalMemProp.memoryTypeCount] {
 		if t.propertyFlags >= {.DEVICE_LOCAL, .HOST_CACHED, .HOST_VISIBLE} {
