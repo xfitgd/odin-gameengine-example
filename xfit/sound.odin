@@ -55,8 +55,8 @@ SoundSrc :: struct {
     gEndSounds = make_non_zeroed([dynamic]^Sound)
 
     resourceManagerConfig := miniaudio.resource_manager_config_init()
-    miniaudio_pCustomBackendVTables[0] = &miniaudio.g_decoding_backend_vtable_libopus
-    miniaudio_pCustomBackendVTables[1] = &miniaudio.g_decoding_backend_vtable_libvorbis
+    miniaudio_pCustomBackendVTables[0] = miniaudio.decoding_backend_vtable_libopus
+    miniaudio_pCustomBackendVTables[1] = miniaudio.decoding_backend_vtable_libvorbis
 
     resourceManagerConfig.ppCustomDecodingBackendVTables = auto_cast &miniaudio_pCustomBackendVTables[0]
     resourceManagerConfig.customDecodingBackendCount = 2

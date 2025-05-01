@@ -10,14 +10,14 @@ when GLFW_SHARED {
 }
 
 
-is_android :: #config(__ANDROID__, false)
+is_android :: ODIN_PLATFORM_SUBTARGET == .Android
 is_mobile :: is_android
 
 when !is_mobile {
 LIBGLFW3 :: "../" + xlibrary.EXTERNAL_LIBPATH + "/glfw/libglfw3" + xlibrary.ARCH_end
 
 foreign import glfw { LIBGLFW3 }
-}
+
 
 #assert(size_of(c.int) == size_of(b32))
 
@@ -183,4 +183,5 @@ foreign glfw {
 	GetPlatform       :: proc() -> c.int ---
 	@(linkage="weak")
 	PlatformSupported :: proc(platform: c.int) -> b32 ---
+}
 }

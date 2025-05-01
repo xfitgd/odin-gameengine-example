@@ -3,6 +3,8 @@ package glfw
 import "core:c"
 import glfw "bindings"
 
+when !glfw.is_mobile {
+
 Init      :: glfw.Init
 Terminate :: glfw.Terminate
 
@@ -252,4 +254,6 @@ PlatformSupported :: glfw.PlatformSupported
 // Used by vendor:OpenGL
 gl_set_proc_address :: proc(p: rawptr, name: cstring) {
 	(^rawptr)(p)^ = GetProcAddress(name)
+}
+
 }

@@ -1,6 +1,6 @@
 package xlibrary
 
-is_android :: #config(__ANDROID__, false)
+is_android :: ODIN_PLATFORM_SUBTARGET == .Android
 is_mobile :: is_android
 
 when ODIN_ARCH == .amd64 {

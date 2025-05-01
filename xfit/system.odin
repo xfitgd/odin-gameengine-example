@@ -116,7 +116,7 @@ when is_android {
 @(private) __depthFmt:TextureFmt
 @(private) __swapImgCnt:u32 = 3
 
-is_android :: #config(__ANDROID__, false)
+is_android :: ODIN_PLATFORM_SUBTARGET == .Android
 is_mobile :: is_android
 is_log :: #config(__log__, true)
 

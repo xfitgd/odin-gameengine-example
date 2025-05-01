@@ -1,8 +1,13 @@
 {
     "setting" : {
-        "is-android" : false,
+        "is-android" : true,
         "main-package-path" : "example",
         "out-path" : "bin/test.bin",
         "build-type" : "minimal"
+    },
+    "android-paths" : {
+        "ndk" : "/usr/local/Android/ndk/29.0.13113456",
+        "sdk" : "/usr/local/Android",
+        "build-tools-version" : "36.0.0"
     }
 }

@@ -7,7 +7,7 @@ import "core:sync"
 import "core:debug/trace"
 import "base:runtime"
 
-is_android :: #config(__ANDROID__, false)
+is_android :: ODIN_PLATFORM_SUBTARGET == .Android
 is_mobile :: is_android
 is_log :: #config(__log__, true)
 

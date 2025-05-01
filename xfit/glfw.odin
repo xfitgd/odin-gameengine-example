@@ -17,6 +17,8 @@ import "base:intrinsics"
 import vk "vendor:vulkan"
 import "core:fmt"
 
+when !is_mobile {
+
 @(private="file") wnd:glfw.WindowHandle = nil
 @(private="file") glfwMonitors:[dynamic]glfw.MonitorHandle
 
@@ -309,4 +311,6 @@ glfwLoop :: proc() {
     }
     exiting = true
    // thread.join(render_th)
+}
+
 }

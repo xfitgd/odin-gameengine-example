@@ -78,22 +78,61 @@ main :: proc() {
 		} else {
 			o = strings.join({"-o:", setting["build-type"].(json.String)}, "", context.temp_allocator)
 		}
-		//defer free_all(	context.temp_allocator)
+		defer free_all(	context.temp_allocator)
 
 		if !findGLSLFileAndRunCmd() do return
 
-		if !runCmd({"odin", "build", 
-		setting["main-package-path"].(json.String), 
-		"-no-bounds-check" if !debug else ({}),
-		out_path, 
-		o, 
-		"-debug" if debug else ({}),
-		//"-sanitize:address" if debug else ({}),
-		({}) if !is_android else "-define:__ANDROID__=true"}) {
-			return
-		}
-
 		if is_android {
+			android_paths := (json_data.(json.Object)["android-paths"]).(json.Object)
+			os.make_directory("android-bin")
+
+			targets :[]string = {
+				"-target:linux_arm64",
+				"-target:linux_arm32",
+				"-target:linux_amd64",
+				"-target:linux_i386",
+				"-target:linux_riscv64",
+			}
+			outPaths :[]string = {
+				"-out:android-bin/arm64.so",
+				"-out:android-bin/arm32.so",
+				"-out:android-bin/amd64.so",
+				"-out:android-bin/i386.so",
+				"-out:android-bin/riscv64.so",
+			}
+
+			ndkPath := android_paths["ndk"].(json.String)
+
+			for target, i in targets {
+				if !runCmd({"odin", "build", 
+				setting["main-package-path"].(json.String), 
+				"-no-bounds-check" if !debug else ({}),
+				outPaths[i], 
+				o, 
+				"-debug" if debug else ({}),
+				//"-sanitize:address" if debug else ({}),
+				"-build-mode:shared",
+				target,
+				"-subtarget:android",
+				}, {
+					strings.join({"ODIN_ANDROID_NDK=", ndkPath}, "", context.temp_allocator),
+					strings.join({"ODIN_ANDROID_NDK_TOOLCHAIN=", ndkPath, "/toolchains/llvm/prebuilt/linux-x86_64"}, "", context.temp_allocator),
+				}) {
+					return
+				}
+			}
+			
+		} else {
+			if !runCmd({"odin", "build", 
+			setting["main-package-path"].(json.String), 
+			"-no-bounds-check" if !debug else ({}),
+			out_path, 
+			o, 
+			"-debug" if debug else ({}),
+			//"-sanitize:address" if debug else ({}),
+			}) {
+				return
+			}
 		}
 	}
 }
@@ -139,7 +178,7 @@ findGLSLFileAndRunCmd :: proc() -> bool {
 	return true
 }
 
-runCmd :: proc(cmd:[]string) -> bool {
+runCmd :: proc(cmd:[]string, env:[]string = nil) -> bool {
 	r, w, err := os2.pipe()
 	if err != nil do panic("pipe")
 
@@ -148,6 +187,7 @@ runCmd :: proc(cmd:[]string) -> bool {
 		command = cmd,
 		stdout  = w,
 		stderr  = w,
+		env = env,
 	})
 	os2.close(w)
 
