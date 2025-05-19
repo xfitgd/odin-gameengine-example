@@ -9,16 +9,11 @@ import "core:c/libc"
 
 @(private = "file") Sound_private :: struct #packed {
     __miniaudio_sound:miniaudio.sound,
-    __miniaudio_audioBuf:miniaudio.audio_buffer
+    __miniaudio_audioBuf:miniaudio.audio_buffer,
+    __inited:bool
 }
 
 SoundError :: miniaudio.result
-SoundErrorFuncNames :: enum {
-    NONE,
-    decoder_init_memory,
-    data_source_get_data_format,
-    decode_memory,
-}
 
 Sound :: struct {
     src:^SoundSrc,
@@ -28,17 +23,21 @@ Sound :: struct {
 SoundFormat::miniaudio.format
 
 SoundSrc :: struct {
-    outData:[]byte,
     format:SoundFormat,
     channels:u32,
     sampleRate:u32,
     sizeInFrames:u64,
+    decoderConfig:miniaudio.decoder_config,
+    decoder:miniaudio.decoder
 }
 
 @(private = "file") miniaudio_engine:miniaudio.engine
 
 @(private = "file") miniaudio_pCustomBackendVTables:[2]^miniaudio.decoding_backend_vtable
+@(private = "file") miniaudio_pCustomBackendVTables2:[2]^miniaudio.decoding_backend_vtable
 @(private = "file") miniaudio_resourceManager:miniaudio.resource_manager
+@(private = "file") miniaudio_resourceManagerConfig:miniaudio.resource_manager_config
+@(private = "file") miniaudio_engineConfig:miniaudio.engine_config
 
 @(private = "file") gSoundsMtx:sync.Mutex
 @(private = "file") gEndSoundsMtx:sync.Mutex
@@ -52,23 +51,26 @@ SoundSrc :: struct {
 
 @private soundStart :: proc() {
     gSounds = make(map[^Sound]^Sound)
-    gEndSounds = make_non_zeroed([dynamic]^Sound)
+    gEndSounds = make([dynamic]^Sound)
 
-    resourceManagerConfig := miniaudio.resource_manager_config_init()
-    miniaudio_pCustomBackendVTables[0] = miniaudio.decoding_backend_vtable_libopus
-    miniaudio_pCustomBackendVTables[1] = miniaudio.decoding_backend_vtable_libvorbis
+    miniaudio_resourceManagerConfig = miniaudio.resource_manager_config_init()
+    miniaudio_pCustomBackendVTables[0] = miniaudio.ma_decoding_backend_libvorbis
+    miniaudio_pCustomBackendVTables[1] = miniaudio.ma_decoding_backend_libopus
+    miniaudio_pCustomBackendVTables2[0] = miniaudio.ma_decoding_backend_libvorbis
+    miniaudio_pCustomBackendVTables2[1] = miniaudio.ma_decoding_backend_libopus
 
-    resourceManagerConfig.ppCustomDecodingBackendVTables = auto_cast &miniaudio_pCustomBackendVTables[0]
-    resourceManagerConfig.customDecodingBackendCount = 2
-    resourceManagerConfig.pCustomDecodingBackendUserData = nil
+    miniaudio_resourceManagerConfig.ppCustomDecodingBackendVTables = &miniaudio_pCustomBackendVTables[0]
+    miniaudio_resourceManagerConfig.customDecodingBackendCount = 2
+    miniaudio_resourceManagerConfig.pCustomDecodingBackendUserData = nil
 
-    res := miniaudio.resource_manager_init(&resourceManagerConfig, &miniaudio_resourceManager)
+    res := miniaudio.resource_manager_init(&miniaudio_resourceManagerConfig, &miniaudio_resourceManager)
     if res != .SUCCESS do panicLog("miniaudio.resource_manager_init : ", res)
 
-    engineConfig := miniaudio.engine_config_init()
-    engineConfig.pResourceManager = &miniaudio_resourceManager
+    miniaudio_engineConfig = miniaudio.engine_config_init()
+    miniaudio_engineConfig.pResourceManager = &miniaudio_resourceManager
     
-    res = miniaudio.engine_init(&engineConfig, &miniaudio_engine)
+    
+    res = miniaudio.engine_init(&miniaudio_engineConfig, &miniaudio_engine)
     if res != .SUCCESS do panicLog("miniaudio.engine_init : ", res)
 
     started = true
@@ -104,7 +106,7 @@ Sound_Deinit :: proc(self:^Sound) {
     deinit2(self)
 }
 @(private = "file") deinit2 :: proc(self:^Sound) {
-    //TODO if self.__private.__miniaudio_sound == nil do return
+    if !self.__private.__inited do return
     miniaudio.sound_uninit(&self.__private.__miniaudio_sound)
     miniaudio.audio_buffer_uninit(&self.__private.__miniaudio_audioBuf)
     free(self)
@@ -145,7 +147,7 @@ SoundSrc_Deinit :: proc(self:^SoundSrc) {
         if key.src == self do deinit2(key)
     }
     sync.mutex_unlock(&gSoundsMtx)
-    libc.free(auto_cast &self.outData[0])
+    miniaudio.decoder_uninit(&self.decoder)
     free(self)
 }
 
@@ -157,24 +159,16 @@ SoundSrc_PlaySoundMemory :: proc(self:^SoundSrc, volume:f32, loop:bool) -> (snd:
     defer if err != .SUCCESS do free(snd)
     snd^ = Sound{ src = self }
 
-    audioBufConfig :miniaudio.audio_buffer_config = {
-        channels = self.channels,
-        format = self.format,
-        sampleRate = self.sampleRate,
-        pData = auto_cast &self.outData[0],
-        sizeInFrames = self.sizeInFrames,
-    }
-    err = miniaudio.audio_buffer_init(&audioBufConfig, &snd.__private.__miniaudio_audioBuf)
+    err = miniaudio.sound_init_from_data_source(
+        pEngine = &miniaudio_engine,
+        pDataSource = snd.src.decoder.ds.pCurrent,
+        flags = {.DECODE},
+        pGroup = nil,
+        pSound = &snd.__private.__miniaudio_sound,
+    )
     if err != .SUCCESS do return
-
-    sndConfig := miniaudio.sound_config_init_2(&miniaudio_engine)
-    sndConfig.endCallback = EndCallback
-    sndConfig.pEndCallbackUserData = auto_cast snd
-    sndConfig.pDataSource = auto_cast &snd.__private.__miniaudio_audioBuf
-    sndConfig.isLooping = auto_cast loop
-
-    err = miniaudio.sound_init_ex(&miniaudio_engine, &sndConfig, &snd.__private.__miniaudio_sound)
-    if err != .SUCCESS do return
+    miniaudio.sound_set_end_callback(&snd.__private.__miniaudio_sound, EndCallback, auto_cast snd)
+    miniaudio.sound_set_looping(&snd.__private.__miniaudio_sound, auto_cast loop)
 
     miniaudio.sound_set_volume(&snd.__private.__miniaudio_sound, volume)
 
@@ -187,6 +181,8 @@ SoundSrc_PlaySoundMemory :: proc(self:^SoundSrc, volume:f32, loop:bool) -> (snd:
     sync.mutex_lock(&gSoundsMtx)
     map_insert(&gSounds, snd, snd)
     sync.mutex_unlock(&gSoundsMtx)
+
+    snd.__private.__inited = true
     return
 }
 
@@ -262,43 +258,19 @@ SetLooping :: #force_inline proc "contextless" (self:^Sound, loop:bool) {
     return auto_cast miniaudio.sound_is_playing(&self.__private.__miniaudio_sound)
 }
 
-@require_results SoundSrc_DecodeSoundMemory :: proc(data:[]byte) -> (result : ^SoundSrc, err: SoundError, errFunc:SoundErrorFuncNames = .NONE) {
+@require_results SoundSrc_DecodeSoundMemory :: proc(data:[]byte) -> (result : ^SoundSrc, err: SoundError) {
     if !intrinsics.atomic_load_explicit(&started, .Acquire) do soundStart()//?soundStart를 따로 호출하지 않고 최초로 사용할때 시작
 
     result = new(SoundSrc)
     defer if err != .SUCCESS do free(result)
 
-    decoderConfig := miniaudio.decoder_config_init_default()
-    decoderConfig.ppCustomBackendVTables = auto_cast &miniaudio_pCustomBackendVTables[0]
-    decoderConfig.customBackendCount = 2
+    result.decoderConfig = miniaudio.decoder_config_init_default()
+    result.decoderConfig.ppCustomBackendVTables = &miniaudio_pCustomBackendVTables2[0]
+    result.decoderConfig.customBackendCount = 2
 
-    decoder : miniaudio.decoder
-    err = miniaudio.decoder_init_memory(raw_data(data), len(data), &decoderConfig, &decoder)
+    err = miniaudio.decoder_init_memory(raw_data(data), len(data), &result.decoderConfig, &result.decoder)
     if err != .SUCCESS {
-        errFunc = .decoder_init_memory
         return
     }
-
-    defer miniaudio.decoder_uninit(&decoder)
-
-    err = miniaudio.data_source_get_data_format(auto_cast &decoder, 
-        &result.format,
-        &result.channels,
-        &result.sampleRate,
-        nil,
-        0)
-    if err != .SUCCESS {
-        errFunc = .data_source_get_data_format
-        return
-    }
-
-    output:rawptr
-    err = miniaudio.decode_memory(raw_data(data), len(data), &decoderConfig, &result.sizeInFrames, &output)
-    if err != .SUCCESS {
-        errFunc = .decode_memory
-        return
-    }
-
-    result.outData = ([^]byte)(output)[:result.sizeInFrames * u64(result.channels)]
     return
 }

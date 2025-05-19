@@ -57,7 +57,7 @@ vkRotationMatrix: Matrix
 
 MAX_FRAMES_IN_FLIGHT :: 2
 vkImageAvailableSemaphore: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore
-vkRenderFinishedSemaphore: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore
+vkRenderFinishedSemaphore: [MAX_FRAMES_IN_FLIGHT][]vk.Semaphore
 vkInFlightFence: [MAX_FRAMES_IN_FLIGHT]vk.Fence
 
 vkGetInstanceProcAddr: proc "system" (
@@ -457,7 +457,7 @@ initSwapChain :: proc() {
 
 	presentModeCnt:u32
 	vk.GetPhysicalDeviceSurfacePresentModesKHR(vkPhysicalDevice, vkSurface, &presentModeCnt, nil)
-	vkPresentModes := make_non_zeroed([]vk.PresentModeKHR, presentModeCnt)
+	vkPresentModes = make_non_zeroed([]vk.PresentModeKHR, presentModeCnt)
 	vk.GetPhysicalDeviceSurfacePresentModesKHR(vkPhysicalDevice, vkSurface, &presentModeCnt, raw_data(vkPresentModes))
 
 	for f in vkFmts {
@@ -540,7 +540,9 @@ vkCreateSwapChainAndImageViews :: proc() {
 			__screenOrientation = .Vertical180
 		} else if .IDENTITY in vkSurfaceCap.currentTransform {
 			__screenOrientation = .Vertical360
-		} 
+		}
+		__windowWidth = vkExtent.width
+		__windowHeight = vkExtent.height
 	}
 
 	vkPresentMode = .FIFO
@@ -581,6 +583,18 @@ vkCreateSwapChainAndImageViews :: proc() {
 	}
 	__swapImgCnt = surfaceImgCnt
 
+	if .OPAQUE in vkSurfaceCap.supportedCompositeAlpha {
+		vkSurfaceCap.supportedCompositeAlpha = {.OPAQUE}
+	} else if .INHERIT in vkSurfaceCap.supportedCompositeAlpha {
+		vkSurfaceCap.supportedCompositeAlpha = {.INHERIT}
+	} else if .PRE_MULTIPLIED in vkSurfaceCap.supportedCompositeAlpha {
+		vkSurfaceCap.supportedCompositeAlpha = {.PRE_MULTIPLIED}
+	} else if .POST_MULTIPLIED in vkSurfaceCap.supportedCompositeAlpha {
+		vkSurfaceCap.supportedCompositeAlpha = {.POST_MULTIPLIED}
+	} else {
+		panicLog("not supports supportedCompositeAlpha")
+	}
+
 	swapChainCreateInfo := vk.SwapchainCreateInfoKHR{
 		sType = vk.StructureType.SWAPCHAIN_CREATE_INFO_KHR,
 		minImageCount = __swapImgCnt,
@@ -591,7 +605,7 @@ vkCreateSwapChainAndImageViews :: proc() {
 		imageUsage = {.COLOR_ATTACHMENT},
 		presentMode = vkPresentMode,
 		preTransform = vkSurfaceCap.currentTransform,
-		compositeAlpha = {.OPAQUE},
+		compositeAlpha = vkSurfaceCap.supportedCompositeAlpha,
 		clipped = true,
 		oldSwapchain = 0,
 		imageSharingMode = .EXCLUSIVE,
@@ -674,8 +688,8 @@ vkCreateSwapChainAndImageViews :: proc() {
 				renderPass = vkRenderPass,
 				attachmentCount = 2,
 				pAttachments = &([]vk.ImageView{vkFrameBufferImageViews[i], vkFrameDepthStencilTexture.__in.texture.imgView, })[0],
-				width = vkExtent.width,
-				height = vkExtent.height,
+				width = vkExtent_rotation.width,
+				height = vkExtent_rotation.height,
 				layers = 1,
 			}
 		} else {
@@ -684,8 +698,8 @@ vkCreateSwapChainAndImageViews :: proc() {
 				renderPass = vkRenderPass,
 				attachmentCount = 3,
 				pAttachments = &([]vk.ImageView{vkMSAAFrameTexture.__in.texture.imgView, vkFrameDepthStencilTexture.__in.texture.imgView, vkFrameBufferImageViews[i]})[0],
-				width = vkExtent.width,
-				height = vkExtent.height,
+				width = vkExtent_rotation.width,
+				height = vkExtent_rotation.height,
 				layers = 1,
 			}
 		}
@@ -734,7 +748,7 @@ vkStart :: proc() {
 		glfwExtensions = glfw.GetRequiredInstanceExtensions()
 		glfwLen = len(glfwExtensions)
 	}
-	instanceExtNames :[dynamic]cstring = make_non_zeroed([dynamic]cstring, 0, len(INSTANCE_EXTENSIONS) + 3 + glfwLen, context.temp_allocator)
+	instanceExtNames :[dynamic]cstring = make_non_zeroed([dynamic]cstring,  context.temp_allocator)
 	defer delete(instanceExtNames)
 	layerNames := make_non_zeroed([dynamic]cstring, 0, len(LAYERS), context.temp_allocator)
 	defer delete(layerNames)
@@ -744,26 +758,29 @@ vkStart :: proc() {
 	layerPropCnt: u32
 	vk.EnumerateInstanceLayerProperties(&layerPropCnt, nil)
 
-	availableLayers := make_non_zeroed([]vk.LayerProperties, layerPropCnt, context.temp_allocator)
-	defer delete(availableLayers, context.temp_allocator)
+	if layerPropCnt > 0 {
+		availableLayers := make_non_zeroed([]vk.LayerProperties, layerPropCnt, context.temp_allocator)
+		defer delete(availableLayers, context.temp_allocator)
 
-	vk.EnumerateInstanceLayerProperties(&layerPropCnt, &availableLayers[0])
+		vk.EnumerateInstanceLayerProperties(&layerPropCnt, &availableLayers[0])
 
-	for &l in availableLayers {
-		for _, i in LAYERS {
-			if !LAYERS_CHECK[i] && mem.compare((transmute([^]byte)LAYERS[i])[:len(LAYERS[i])], l.layerName[:len(LAYERS[i])]) == 0 {
-				when !ODIN_DEBUG {
-					if LAYERS[i] == "VK_LAYER_KHRONOS_validation" do continue
+		for &l in availableLayers {
+			for _, i in LAYERS {
+				if !LAYERS_CHECK[i] && mem.compare((transmute([^]byte)LAYERS[i])[:len(LAYERS[i])], l.layerName[:len(LAYERS[i])]) == 0 {
+					when !ODIN_DEBUG {
+						if LAYERS[i] == "VK_LAYER_KHRONOS_validation" do continue
+					}
+					non_zero_append(&layerNames, LAYERS[i])
+					LAYERS_CHECK[i] = true
+					when is_log do printfln(
+						"XFIT SYSLOG : vulkan %s instance layer support",
+						LAYERS[i],
+					)
 				}
-				non_zero_append(&layerNames, LAYERS[i])
-				LAYERS_CHECK[i] = true
-				when is_log do printfln(
-					"XFIT SYSLOG : vulkan %s instance layer support",
-					LAYERS[i],
-				)
 			}
 		}
 	}
+
 	instanceExtCnt: u32
 	vk.EnumerateInstanceExtensionProperties(nil, &instanceExtCnt, nil)
 
@@ -885,12 +902,19 @@ vkStart :: proc() {
 	}
 	queueCnt: u32 = 1 if vkGraphicsFamilyIndex == vkPresentFamilyIndex else 2
 
-	physicalDeviceFeatures := vk.PhysicalDeviceFeatures {
-		samplerAnisotropy = true,
-		sampleRateShading = true, //FOR ANTI-ALISING //TODO
-		independentBlend = true,
-		fillModeNonSolid = true,
-		//geometryShader = true,
+	when vkWIREMODE {
+		physicalDeviceFeatures := vk.PhysicalDeviceFeatures {
+			samplerAnisotropy = true,
+			sampleRateShading = true, //FOR ANTI-ALISING
+			fillModeNonSolid = true,
+			//geometryShader = true,
+		}
+	} else {
+		physicalDeviceFeatures := vk.PhysicalDeviceFeatures {
+			samplerAnisotropy = true,
+			sampleRateShading = true, //FOR ANTI-ALISING
+			//geometryShader = true,
+		}
 	}
 
 	deviceExtCnt: u32
@@ -907,7 +931,7 @@ vkStart :: proc() {
 		for _, i in DEVICE_EXTENSIONS {
 			if !DEVICE_EXTENSIONS_CHECK[i] &&
 			   mem.compare((transmute([^]byte)DEVICE_EXTENSIONS[i])[:len(DEVICE_EXTENSIONS[i])],e.extensionName[:len(DEVICE_EXTENSIONS[i])]) == 0 {
-				non_zero_append(&instanceExtNames, DEVICE_EXTENSIONS[i])
+				non_zero_append(&deviceExtNames, DEVICE_EXTENSIONS[i])
 				DEVICE_EXTENSIONS_CHECK[i] = true
 				when is_log do printfln(
 					"XFIT SYSLOG : vulkan %s device ext support",
@@ -1180,6 +1204,7 @@ vkDestory :: proc() {
 	// vk.DestroyRenderPass(vkDevice, vkRenderPassClear, nil)
 
 	delete(vkFmts)
+	delete(vkPresentModes)
 	RenderCmd_Clean()
 
 	vk.DestroySurfaceKHR(vkInstance, vkSurface, nil)
@@ -1222,7 +1247,7 @@ vkRecreateSwapChain :: proc() {
 	vkWaitDeviceIdle()
 
 	when is_android {//? ANDROID ONLY
-		vulkanAndroidStart(&vkSurface)
+		vulkanAndroidStart()
 	}
 
 	//vkCleanSyncObject()
@@ -1270,10 +1295,9 @@ vkReleaseFullScreenEx :: proc() {
 
 vkRecreateSurface :: proc() {
 	when is_android {
-		//TODO LOAD FUNC
-		vulkanAndroidStart(&vkSurface)
+		vulkanAndroidStart()
 	} else {// !ismobile
-		glfwVulkanStart(&vkSurface)
+		glfwVulkanStart()
 	}
 }
 
@@ -1341,8 +1365,9 @@ vkDrawFrame :: proc() {
 
 	vkOpExecute(true)
 
-	if vkExtent.width <= 0 || vkExtent.height <= 0 || sizeUpdated {
+	if vkExtent.width <= 0 || vkExtent.height <= 0 {
 		vkRecreateSwapChain()
+		frame = 0
 		return
 	}
 
@@ -1354,10 +1379,12 @@ vkDrawFrame :: proc() {
 	res = vk.AcquireNextImageKHR(vkDevice, vkSwapchain, max(u64), vkImageAvailableSemaphore[frame], 0, &imageIndex)
 	if res == .ERROR_OUT_OF_DATE_KHR {
 		vkRecreateSwapChain()
+		frame = 0
 		return
 	} else if res == .ERROR_SURFACE_LOST_KHR {
 		vkRecreateSurface()
 		vkRecreateSwapChain()
+		frame = 0
 		return
 	} else if res != .SUCCESS { panicLog("AcquireNextImageKHR : ", res) }
 	
@@ -1376,7 +1403,7 @@ vkDrawFrame :: proc() {
 			commandBufferCount = 1,
 			pCommandBuffers = &gRenderCmd[gMainRenderCmdIdx].cmds[frame][imageIndex],
 			signalSemaphoreCount = 1,
-			pSignalSemaphores = &vkRenderFinishedSemaphore[frame],
+			pSignalSemaphores = &vkRenderFinishedSemaphore[frame][imageIndex],
 		}
 
 		res = vk.ResetFences(vkDevice, 1, &vkInFlightFence[frame])
@@ -1422,7 +1449,7 @@ vkDrawFrame :: proc() {
 			commandBufferCount = 1,
 			pCommandBuffers = &vkCmdBuffer[frame],
 			signalSemaphoreCount = 1,
-			pSignalSemaphores = &vkRenderFinishedSemaphore[frame],
+			pSignalSemaphores = &vkRenderFinishedSemaphore[frame][imageIndex],
 		}
 
 		res = vk.ResetFences(vkDevice, 1, &vkInFlightFence[frame])
@@ -1434,15 +1461,10 @@ vkDrawFrame :: proc() {
 		sync.mutex_unlock(&gRenderCmdMtx)
 	}
 
-	//vkWaitAllocatorCmdFence()
-	// if frame == MAX_FRAMES_IN_FLIGHT - 1 {
-	// 	vkOpExecuteDestroy()
-	// }
-
 	presentInfo := vk.PresentInfoKHR {
 		sType = vk.StructureType.PRESENT_INFO_KHR,
 		waitSemaphoreCount = 1,
-		pWaitSemaphores = &vkRenderFinishedSemaphore[frame],
+		pWaitSemaphores = &vkRenderFinishedSemaphore[frame][imageIndex],
 		swapchainCount = 1,
 		pSwapchains = &vkSwapchain,
 		pImageIndices = &imageIndex,
@@ -1452,6 +1474,7 @@ vkDrawFrame :: proc() {
 
 	if res == .ERROR_OUT_OF_DATE_KHR {
 		vkRecreateSwapChain()
+		frame = 0
 		return
 	} else if res == .SUBOPTIMAL_KHR {
 		prop : vk.SurfaceCapabilitiesKHR
@@ -1464,6 +1487,11 @@ vkDrawFrame :: proc() {
 	} else if res == .ERROR_SURFACE_LOST_KHR {
 		vkRecreateSurface()
 		vkRecreateSwapChain()
+		frame = 0
+		return
+	} else if sizeUpdated {
+		vkRecreateSwapChain()
+		frame = 0
 		return
 	} else if res != .SUCCESS { panicLog("QueuePresentKHR : ", res) }
 
@@ -1492,9 +1520,14 @@ vkCreateSyncObject :: proc() {
 		vk.CreateSemaphore(vkDevice, &vk.SemaphoreCreateInfo{
 			sType = vk.StructureType.SEMAPHORE_CREATE_INFO,
 		}, nil, &vkImageAvailableSemaphore[i])
-		vk.CreateSemaphore(vkDevice, &vk.SemaphoreCreateInfo{
-			sType = vk.StructureType.SEMAPHORE_CREATE_INFO,
-		}, nil, &vkRenderFinishedSemaphore[i])
+
+		vkRenderFinishedSemaphore[i] = make_non_zeroed([]vk.Semaphore, int(__swapImgCnt))
+		for j in 0..<int(__swapImgCnt) {
+			vk.CreateSemaphore(vkDevice, &vk.SemaphoreCreateInfo{
+				sType = vk.StructureType.SEMAPHORE_CREATE_INFO,
+			}, nil, &vkRenderFinishedSemaphore[i][j])
+		}
+
 		vk.CreateFence(vkDevice, &vk.FenceCreateInfo{
 			sType = vk.StructureType.FENCE_CREATE_INFO,
 			flags = {vk.FenceCreateFlag.SIGNALED},
@@ -1505,7 +1538,10 @@ vkCreateSyncObject :: proc() {
 vkCleanSyncObject :: proc() {
 	for i in 0..<MAX_FRAMES_IN_FLIGHT {
 		vk.DestroySemaphore(vkDevice, vkImageAvailableSemaphore[i], nil)
-		vk.DestroySemaphore(vkDevice, vkRenderFinishedSemaphore[i], nil)
+		for j in 0..<int(__swapImgCnt) {
+			vk.DestroySemaphore(vkDevice, vkRenderFinishedSemaphore[i][j], nil)
+		}
+		delete(vkRenderFinishedSemaphore[i])
 		vk.DestroyFence(vkDevice, vkInFlightFence[i], nil)
 	}
 }

@@ -8,6 +8,9 @@ import "../vorbis"
 import "../ogg"
 
 foreign import lib {
+    vorbisfile.LIB,
+    vorbis.LIB,
+    ogg.LIB,
 	LIB,
 }
 
@@ -58,6 +61,7 @@ foreign lib {
     libvorbis_get_cursor_in_pcm_frames :: proc (pVorbis: ^libvorbis, pCursor: ^u64) -> result ---
     
     libvorbis_get_length_in_pcm_frames :: proc (pVorbis: ^libvorbis, pLength: ^u64) -> result ---
-
-    decoding_backend_vtable_libvorbis : ^decoding_backend_vtable
+}
+foreign lib {
+    ma_decoding_backend_libvorbis : ^decoding_backend_vtable
 }

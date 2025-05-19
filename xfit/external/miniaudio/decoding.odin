@@ -51,7 +51,7 @@ decoder_config :: struct {
 	allocationCallbacks:    allocation_callbacks,
 	encodingFormat:         encoding_format,
 	seekPointCount:         u32,   /* When set to > 0, specifies the number of seek points to use for the generation of a seek table. Not all decoding backends support this. */
-	ppCustomBackendVTables: ^[^]decoding_backend_vtable,
+	ppCustomBackendVTables: [^]^decoding_backend_vtable,
 	customBackendCount:     u32,
 	pCustomBackendUserData: rawptr,
 }

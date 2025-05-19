@@ -996,8 +996,8 @@ VkBufferResource_Deinit :: proc(self: ^$T) where T == VkBufferResource || T == V
 	//?? no need? execute_register_descriptor_pool
 }
 @(private = "file") __CreateDescriptorPool :: proc(size:[]VkDescriptorPoolSize, out:^VkDescriptorPoolMem) {
-	poolSize :[]vk.DescriptorPoolSize = make_non_zeroed([]vk.DescriptorPoolSize, len(size), context.temp_allocator)
-	defer delete(poolSize, context.temp_allocator)
+	poolSize :[]vk.DescriptorPoolSize = make_non_zeroed([]vk.DescriptorPoolSize, len(size))
+	defer delete(poolSize)
 
 	for _, i in size {
 		poolSize[i].descriptorCount = size[i].cnt * vkPoolBlock

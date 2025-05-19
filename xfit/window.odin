@@ -134,3 +134,10 @@ WindowX :: proc "contextless" () -> i32 {
 WindowY :: proc "contextless" () -> i32 {
 	return __windowY.?
 }
+SetVSync :: proc "contextless" (vSync:VSync) {
+	__vSync = vSync
+	sizeUpdated = true
+}
+GetVSync :: proc "contextless" () -> VSync {
+	return __vSync
+}

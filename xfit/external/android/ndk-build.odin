@@ -11,14 +11,14 @@ __ANDROID_NDK__ :: 1
  *
  * For example: 16 for r16.
  */
-__NDK_MAJOR__ :: 26
+__NDK_MAJOR__ :: 29
 
 /**
  * Minor version of this NDK.
  *
  * For example: 0 for r16 and 1 for r16b.
  */
-__NDK_MINOR__ :: 1
+__NDK_MINOR__ :: 0
 
 /**
  * Set to 0 if this is a release build, or 1 for beta 1,
@@ -31,7 +31,7 @@ __NDK_BETA__ :: 0
  *
  * For a local development build of the NDK, this is -1.
  */
-__NDK_BUILD__ :: 10909125
+__NDK_BUILD__ :: 13113456
 
 /**
  * Set to 1 if this is a canary build, 0 if not.

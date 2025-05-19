@@ -93,10 +93,10 @@ glfwSetWindowMode :: proc "contextless" () {
        glfw.DONT_CARE)
 }
 
-glfwVulkanStart :: proc "contextless" (surface: ^vk.SurfaceKHR) {
-    if surface != nil do vk.DestroySurfaceKHR(vkInstance, surface^, nil)
+glfwVulkanStart :: proc "contextless" () {
+    if vkSurface != 0 do vk.DestroySurfaceKHR(vkInstance, vkSurface, nil)
 
-    res := glfw.CreateWindowSurface(vkInstance, wnd, nil, surface)
+    res := glfw.CreateWindowSurface(vkInstance, wnd, nil, &vkSurface)
     if (res != .SUCCESS) do panicLog("glfwVulkanStart : ", res)
 }
 
@@ -269,7 +269,7 @@ glfwLoop :: proc() {
         __windowHeight = u32(height)
 
         if loopStart {
-            intrinsics.atomic_store_explicit(&sizeUpdated, true, .Release)
+            sizeUpdated = true
         }
     }
     glfwWindowPosProc :: proc "c" (window: glfw.WindowHandle, xpos, ypos: c.int) {
@@ -292,6 +292,13 @@ glfwLoop :: proc() {
         }
         Activate()
     }
+    glfwWindowRefreshProc :: proc "c" (window: glfw.WindowHandle) {
+        //! no need
+        // if !Paused() {
+        //     context = runtime.default_context()
+        //     vkDrawFrame()
+        // }
+    }
     glfw.SetKeyCallback(wnd, glfwKeyProc)
     glfw.SetMouseButtonCallback(wnd, glfwMouseButtonProc)
     glfw.SetCharCallback(wnd, glfwCharProc)
@@ -300,8 +307,9 @@ glfwLoop :: proc() {
     glfw.SetJoystickCallback(glfwJoystickProc)
     glfw.SetWindowCloseCallback(wnd, glfwWindowCloseProc)
     glfw.SetWindowFocusCallback(wnd, glfwWindowFocusProc)
-    glfw.SetWindowSizeCallback(wnd, glfwWindowSizeProc)
+    glfw.SetFramebufferSizeCallback(wnd, glfwWindowSizeProc)
     glfw.SetWindowPosCallback(wnd, glfwWindowPosProc)
+    glfw.SetWindowRefreshCallback(wnd, glfwWindowRefreshProc)
 
     x, y: c.int
     x, y = glfw.GetWindowPos(wnd)

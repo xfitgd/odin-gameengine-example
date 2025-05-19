@@ -83,8 +83,15 @@ __Rect_Init :: #force_inline proc "contextless"(pos: [2]$T, size: [2]T) -> Rect_
 
 __Rect_Init2 :: #force_inline proc "contextless"(x: $T, y: T, width: T, height: T) -> Rect_(T) {
 	res: Rect_(T)
-	res.pos = T{x, y}
-	res.size = T{width, height}
+	res.pos = [2]T{x, y}
+	res.size = [2]T{width, height}
+	return res
+}
+
+Rect_Init_LTRB :: #force_inline proc "contextless"(left: $T, right: T, top: T, bottom: T) -> Rect_(T) {
+	res: Rect_(T)
+	res.pos = [2]T{left, top}
+	res.size = [2]T{right - left, bottom - top}
 	return res
 }
 
@@ -129,7 +136,11 @@ Rect_And :: #force_inline proc "contextless" (_r1: Rect_($T), _r2: Rect_(T)) -> 
 	return res, true
 }
 Rect_Or :: #force_inline proc "contextless" (_r1: Rect_($T), _r2: Rect_(T)) -> Rect_(T) #no_bounds_check {
+	if _r1.size.x == 0 || _r1.size.y == 0 do return _r2
+	if _r2.size.x == 0 || _r2.size.y == 0 do return _r1
+
 	res: Rect_(T)
+
 	for _, i in res.pos {
 		res.pos[i] = math.min(_r1.pos[i], _r2.pos[i])
 		res.size[i] = math.max(Rect_RightBottom(_r1)[i], Rect_RightBottom(_r2)[i])

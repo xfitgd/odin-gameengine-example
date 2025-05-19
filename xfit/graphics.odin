@@ -52,9 +52,6 @@ __ColorMatrixIn :: struct {
 __MatrixIn :: struct {
     mat: Matrix,
     matUniform:VkBufferResource,
-    pos: Point3DF,
-    rotation: f32,
-    scale: PointF,
     checkInit: ICheckInit,
 }
 
@@ -105,12 +102,12 @@ TileTextureArray :: struct {
 }
 
 __TileTextureArrayIn :: struct {
-    using _:__TextureArrayIn,
+    using textureArrayIn:__TextureArrayIn,
     allocPixels:[]byte,
 }
 
 Image :: struct {
-    using _:IObject,
+    using object:IObject,
     __in2: __ImageIn,
 }
 
@@ -119,7 +116,7 @@ __ImageIn :: struct {
 }
 
 AnimateImage :: struct {
-    using _:IObject,
+    using object:IObject,
     __in2: __AnimateImageIn,
 }
 
@@ -130,7 +127,7 @@ __AnimateImageIn :: struct {
 }
 
 TileImage :: struct {
-    using _:IObject,
+    using object:IObject,
     __in2: __TileImageIn,
 }
 
@@ -159,11 +156,12 @@ __ShapeSrcIn :: struct {
 }       
 
 ShapeSrc :: struct {
+    rect:RectF,
     __in:__ShapeSrcIn,
 }
 
 Shape :: struct {
-    using _:IObject,
+    using object:IObject,
     __in2:__ShapeIn,
 }
 
@@ -188,7 +186,7 @@ IsAnyImageType :: #force_inline proc "contextless" ($ANY_IMAGE:typeid) -> bool {
     intrinsics.type_field_type(ANY_IMAGE, "src") == TileTextureArray)
 }
 
-ImagePixelPerfectPoint :: proc "contextless" (img:^$ANY_IMAGE, p:PointF, canvasW:f32, canvasH:f32, center:ImageCenterPtPos) -> PointF where IsAnyImageType(ANY_IMAGE) {
+ImagePixelPerfectPoint :: proc "contextless" (img:^$ANY_IMAGE, p:PointF, canvasW:f32, canvasH:f32, pivot:ImageCenterPtPos) -> PointF where IsAnyImageType(ANY_IMAGE) {
     width := __windowWidth
     height := __windowHeight
     widthF := f32(width)
@@ -202,7 +200,7 @@ ImagePixelPerfectPoint :: proc "contextless" (img:^$ANY_IMAGE, p:PointF, canvasW
     if width % 2 == 0 do p.x -= 0.5
     if height % 2 == 0 do p.y += 0.5
 
-    #partial switch center {
+    #partial switch pivot {
         case .Center:
             if img.src.__in.texture.option.width % 2 != 0 do p.x += 0.5
             if img.src.__in.texture.option.height % 2 != 0 do p.y -= 0.5
@@ -298,7 +296,7 @@ Projection_InitMatrixOrthoWindow :: proc (self:^Projection, width:f32, height:f3
 }
 
 @private __Projection_UpdateOrtho :: #force_inline proc(self:^Projection, left:f32, right:f32, bottom:f32, top:f32, near:f32 = 0.1, far:f32 = 100, flipZAxisForVulkan := true) {
-    //TODO self.__in.mat = linalg.matrix_ortho3d_f32(left, right, bottom, top, near, far, flipZAxisForVulkan)
+    self.__in.mat = linalg.matrix_ortho3d_f32(left, right, bottom, top, near, far, flipZAxisForVulkan)
 }
 
 Projection_UpdateOrtho :: #force_inline proc(self:^Projection,  left:f32, right:f32, bottom:f32, top:f32, near:f32 = 0.1, far:f32 = 100, flipZAxisForVulkan := true) {
@@ -306,7 +304,7 @@ Projection_UpdateOrtho :: #force_inline proc(self:^Projection,  left:f32, right:
     Projection_UpdateMatrixRaw(self, self.__in.mat)
 }
 
-@private __Projection_UpdateOrthoWindow :: #force_inline proc(self:^Projection, width:f32, height:f32, near:f32 = 0.1, far:f32 = 100, flipZAxisForVulkan := true) {
+@private __Projection_UpdateOrthoWindow :: #force_inline proc(self:^Projection, width:f32, height:f32, near:f32 = 0.1, far:f32 = 100, flipAxisForVulkan := true) {
     windowWidthF := f32(__windowWidth.?)
     windowHeightF := f32(__windowHeight.?)
     ratio := windowWidthF / windowHeightF > width / height ? height / windowHeightF : width / windowWidthF
@@ -314,14 +312,13 @@ Projection_UpdateOrtho :: #force_inline proc(self:^Projection,  left:f32, right:
     windowWidthF *= ratio
     windowHeightF *= ratio
 
-    r := 1.0 / (far - near)
     self.__in.mat = {
-        -2.0 / windowWidthF, 0, 0, 0,
+        2.0 / windowWidthF, 0, 0, 0,
         0, 2.0 / windowHeightF, 0, 0,
-        0, 0, r, 0,
-        0, 0, -r * near, 1,
+        0, 0, 1 / (far - near), -near / (far - near),
+        0, 0, 0, 1,
     }
-    if flipZAxisForVulkan {
+    if flipAxisForVulkan {
         self.__in.mat[1,1] = -self.__in.mat[1,1]
     }
 }
@@ -344,14 +341,28 @@ Projection_InitMatrixPerspective :: proc (self:^Projection, fov:f32, aspect:f32 
     __Projection_Init(self)
 }
 
-@private __Projection_UpdatePerspective :: #force_inline proc(self:^Projection, fov:f32, aspect:f32 = 0, near:f32 = 0.1, far:f32 = 100, flipZAxisForVulkan := true) {
+@private __Projection_UpdatePerspective :: #force_inline proc(self:^Projection, fov:f32, aspect:f32 = 0, near:f32 = 0.1, far:f32 = 100, flipAxisForVulkan := true) {
     aspectF := aspect
-    if aspectF == 0 do aspectF = f32(__windowWidth.? / __windowHeight.?)
-    //TODO self.__in.mat = linalg.matrix4_perspective_f32(fov, aspectF, near, far, flipZAxisForVulkan)
+    if aspectF == 0 do aspectF = f32(__windowWidth.?) / f32(__windowHeight.?)
+    sfov :f32 = math.sin(0.5 * fov)
+    cfov :f32 = math.cos(0.5 * fov)
+
+    h := cfov / sfov
+    w := h / aspectF
+    r := far / (far - near)
+    self.__in.mat = {
+         w, 0, 0, 0,
+         0, h, 0, 0,
+         0, 0, r, -r * near,
+         0, 0, 1, 0,
+    };
+    if flipAxisForVulkan {
+        self.__in.mat[1,1] = -self.__in.mat[1,1]
+    }
 }
 
-Projection_UpdatePerspective :: #force_inline proc(self:^Projection, fov:f32, aspect:f32 = 0, near:f32 = 0.1, far:f32 = 100, flipZAxisForVulkan := true) {
-    __Projection_UpdatePerspective(self, fov, aspect, near, far, flipZAxisForVulkan)
+Projection_UpdatePerspective :: #force_inline proc(self:^Projection, fov:f32, aspect:f32 = 0, near:f32 = 0.1, far:f32 = 100, flipAxisForVulkan := true) {
+    __Projection_UpdatePerspective(self, fov, aspect, near, far, flipAxisForVulkan)
     Projection_UpdateMatrixRaw(self, self.__in.mat)
 }
 
@@ -360,7 +371,7 @@ Projection_UpdatePerspective :: #force_inline proc(self:^Projection, fov:f32, as
     xmem.ICheckInit_Init(&self.__in.checkInit)
     mat : Matrix
     when is_mobile {
-        mat = linalg.matrix_mul(self.__in.mat, vkRotationMatrix)
+        mat = linalg.matrix_mul(vkRotationMatrix, self.__in.mat)
     } else {
         mat = self.__in.mat
     }
@@ -381,7 +392,7 @@ Projection_UpdateMatrixRaw :: proc(self:^Projection, _mat:Matrix) {
     xmem.ICheckInit_Check(&self.__in.checkInit)
     mat : Matrix
     when is_mobile {
-        mat = linalg.matrix_mul(_mat, vkRotationMatrix)
+        mat = linalg.matrix_mul(vkRotationMatrix, _mat)
     } else {
         mat = _mat
     }
@@ -415,7 +426,18 @@ Camera_UpdateMatrixRaw :: proc(self:^Camera, _mat:Matrix) {
 }
 
 @private __Camera_Update :: #force_inline proc(self:^Camera, eyeVec:Point3DF, focusVec:Point3DF, upVec:Point3DF = {0,0,1}) {
-    self.__in.mat = linalg.matrix4_look_at_f32(eyeVec, focusVec, upVec, false)
+    f := linalg.normalize(focusVec - eyeVec)
+	s := linalg.normalize(linalg.cross(upVec, f))
+	u := linalg.normalize(linalg.cross(f, s))
+
+	fe := linalg.dot(f, eyeVec)
+
+    self.__in.mat = {
+		+s.x, +s.y, +s.z, -linalg.dot(s, eyeVec),
+		+u.x, +u.y, +u.z, -linalg.dot(u, eyeVec),
+		+f.x, +f.y, +f.z, -fe,
+		   0,    0,    0, 1,
+	}
 }
 
 Camera_Init :: proc (self:^Camera, eyeVec:Point3DF = {0,0,-1}, focusVec:Point3DF = {0,0,0}, upVec:Point3DF = {0,1,0}) {
@@ -452,12 +474,21 @@ ColorTransform_UpdateMatrixRaw :: proc(self:^ColorTransform, _mat:Matrix) {
     VkBufferResource_CopyUpdate(&self.__in.matUniform, &self.__in.mat)
 }
 
+
+@(require_results)
+SRT_2D_Matrix :: proc "contextless" (t: Point3DF, r: f32 = 0.0, s: PointF = {1.0, 1.0}, cp:PointF = {0.0, 0.0}) -> linalg.Matrix4x4f32 {
+	pivot := linalg.matrix4_translate(Point3DF{cp.x,cp.y,0.0})
+	translation := linalg.matrix4_translate(t)
+	rotation := linalg.matrix4_rotate_f32(r, linalg.Vector3f32{0.0, 0.0, 1.0})
+	scale := linalg.matrix4_scale(Point3DF{s.x,s.y,1.0})
+	return linalg.mul(translation, linalg.mul(rotation, linalg.mul(pivot, scale)))
+}
+
 //IObject
 
-
 @private IObject_Init :: proc(self:^IObject, $actualType:typeid,
-    pos:Point3DF, rotation:f32, scale:PointF = {1,1}, 
-    camera:^Camera, projection:^Projection, colorTransform:^ColorTransform = nil)
+    pos:Point3DF, rotation:f32, scale:PointF = {1,1},
+    camera:^Camera, projection:^Projection, colorTransform:^ColorTransform = nil, pivot:PointF = {0.0, 0.0})
     where actualType != IObject && intrinsics.type_is_subtype_of(actualType, IObject) {
 
     xmem.ICheckInit_Init(&self.__in.__in.checkInit)
@@ -465,10 +496,7 @@ ColorTransform_UpdateMatrixRaw :: proc(self:^ColorTransform, _mat:Matrix) {
     self.__in.projection = projection
     self.__in.colorTransform = colorTransform == nil ? &__defColorTransform : colorTransform
     
-    self.__in.__in.mat = linalg.matrix4_from_trs_f32(pos, linalg.quaternion_angle_axis_f32(rotation, {0,0,1}), {scale.x, scale.y, 1})
-    self.__in.__in.pos = pos
-    self.__in.__in.rotation = rotation
-    self.__in.__in.scale = scale
+    self.__in.__in.mat = SRT_2D_Matrix(pos, rotation, scale, pivot)
 
     self.__in.set.__set = 0
 
@@ -533,12 +561,9 @@ ColorTransform_UpdateMatrixRaw :: proc(self:^ColorTransform, _mat:Matrix) {
     VkUpdateDescriptorSets(mem.slice_ptr(&self.__in.set, 1))
 }
 
-IObject_UpdateTransform :: proc(self:^IObject, pos:Point3DF, rotation:f32 = 0, scale:PointF = {1,1}) {
+IObject_UpdateTransform :: proc(self:^IObject, pos:Point3DF, rotation:f32 = 0.0, scale:PointF = {1.0,1.0}, pivot:PointF = {0.0,0.0}) {
     xmem.ICheckInit_Check(&self.__in.__in.checkInit)
-    self.__in.__in.mat = linalg.matrix4_from_trs_f32(pos, linalg.quaternion_angle_axis_f32(rotation, {0,0,1}), {scale.x, scale.y, 1})
-    self.__in.__in.pos = pos
-    self.__in.__in.rotation = rotation
-    self.__in.__in.scale = scale
+    self.__in.__in.mat = SRT_2D_Matrix(pos, rotation, scale, pivot)
     VkBufferResource_CopyUpdate(&self.__in.__in.matUniform, &self.__in.__in.mat)
 }
 IObject_UpdateTransformMatrixRaw :: proc(self:^IObject, _mat:Matrix) {
@@ -572,63 +597,6 @@ IObject_GetCamera :: #force_inline proc "contextless" (self:^IObject) -> ^Camera
 IObject_GetProjection :: #force_inline proc "contextless" (self:^IObject) -> ^Projection {
     xmem.ICheckInit_Check(&self.__in.__in.checkInit)
     return self.__in.projection
-}
-
-IObject_GetPos :: #force_inline proc "contextless" (self:^IObject) -> Point3DF {
-    xmem.ICheckInit_Check(&self.__in.__in.checkInit)
-    return self.__in.__in.pos
-}
-IObject_GetX :: #force_inline proc "contextless" (self:^IObject) -> f32 {
-    xmem.ICheckInit_Check(&self.__in.__in.checkInit)
-    return self.__in.__in.pos.x
-}
-IObject_GetY :: #force_inline proc "contextless" (self:^IObject) -> f32 {
-    xmem.ICheckInit_Check(&self.__in.__in.checkInit)
-    return self.__in.__in.pos.y
-}
-IObject_GetZ :: #force_inline proc "contextless" (self:^IObject) -> f32 {
-    xmem.ICheckInit_Check(&self.__in.__in.checkInit)
-    return self.__in.__in.pos.z
-}
-IObject_GetRotation :: #force_inline proc "contextless" (self:^IObject) -> f32 {
-    xmem.ICheckInit_Check(&self.__in.__in.checkInit)
-    return self.__in.__in.rotation
-}
-IObject_GetScale :: #force_inline proc "contextless" (self:^IObject) -> PointF {
-    xmem.ICheckInit_Check(&self.__in.__in.checkInit)
-    return self.__in.__in.scale
-}
-IObject_GetScaleX :: #force_inline proc "contextless" (self:^IObject) -> f32 {
-    xmem.ICheckInit_Check(&self.__in.__in.checkInit)
-    return self.__in.__in.scale.x
-}
-IObject_GetScaleY :: #force_inline proc "contextless" (self:^IObject) -> f32 {
-    xmem.ICheckInit_Check(&self.__in.__in.checkInit)
-    return self.__in.__in.scale.y
-}
-IObject_SetPos :: #force_inline proc (self:^IObject, pos:Point3DF) {
-    IObject_UpdateTransform(self, pos, self.__in.__in.rotation, self.__in.__in.scale)
-}
-IObject_SetX :: #force_inline proc (self:^IObject, x:f32) {
-    IObject_UpdateTransform(self, {x, self.__in.__in.pos.y, self.__in.__in.pos.z}, self.__in.__in.rotation, self.__in.__in.scale)
-}
-IObject_SetY :: #force_inline proc (self:^IObject, y:f32) {
-    IObject_UpdateTransform(self, {self.__in.__in.pos.x, y, self.__in.__in.pos.z}, self.__in.__in.rotation, self.__in.__in.scale)
-}
-IObject_SetZ :: #force_inline proc (self:^IObject, z:f32) {
-    IObject_UpdateTransform(self, {self.__in.__in.pos.x, self.__in.__in.pos.y, z}, self.__in.__in.rotation, self.__in.__in.scale)
-}
-IObject_SetRotation :: #force_inline proc (self:^IObject, rotation:f32) {
-    IObject_UpdateTransform(self, self.__in.__in.pos, rotation, self.__in.__in.scale)
-}
-IObject_SetScale :: #force_inline proc (self:^IObject, scale:PointF) {
-    IObject_UpdateTransform(self, self.__in.__in.pos, self.__in.__in.rotation, scale)
-}
-IObject_SetScaleX :: #force_inline proc (self:^IObject, x:f32) {
-    IObject_UpdateTransform(self, self.__in.__in.pos, self.__in.__in.rotation, {x, self.__in.__in.scale.y})
-}
-IObject_SetScaleY :: #force_inline proc (self:^IObject, y:f32) {
-    IObject_UpdateTransform(self, self.__in.__in.pos, self.__in.__in.rotation, {self.__in.__in.scale.x, y})
 }
 
 IObject_GetActualType :: #force_inline proc "contextless" (self:^IObject) -> typeid {
@@ -669,8 +637,9 @@ IObject_Update :: proc(self:^IObject) {
     Deinit = auto_cast _Super_Shape_Deinit,
 }
 
-Shape_Init :: proc(self:^Shape, $actualType:typeid, src:^ShapeSrc, pos:Point3DF, rotation:f32, scale:PointF = {1,1}, 
-camera:^Camera, projection:^Projection, colorTransform:^ColorTransform = nil, vtable:^IObjectVTable = nil) where intrinsics.type_is_subtype_of(actualType, Shape) {
+Shape_Init :: proc(self:^Shape, $actualType:typeid, src:^ShapeSrc, pos:Point3DF, rotation:f32, scale:PointF = {1,1},
+camera:^Camera, projection:^Projection, colorTransform:^ColorTransform = nil, pivot:PointF = {0.0, 0.0}, vtable:^IObjectVTable = nil)
+ where intrinsics.type_is_subtype_of(actualType, Shape) {
     self.__in2.src = src
 
     self.__in.set.bindings = __transformUniformPoolBinding[:]
@@ -683,7 +652,7 @@ camera:^Camera, projection:^Projection, colorTransform:^ColorTransform = nil, vt
 
     self.__in.vtable.__in.__GetUniformResources = auto_cast __GetUniformResources_Default
 
-    IObject_Init(self, actualType, pos, rotation, scale, camera, projection, colorTransform)
+    IObject_Init(self, actualType, pos, rotation, scale, camera, projection, colorTransform, pivot)
 }
 
 _Super_Shape_Deinit :: proc(self:^Shape) {
@@ -708,8 +677,8 @@ Shape_GetProjection :: #force_inline proc "contextless" (self:^Shape) -> ^Projec
 Shape_GetColorTransform :: #force_inline proc "contextless" (self:^Shape) -> ^ColorTransform {
     return IObject_GetColorTransform(self)
 }
-Shape_UpdateTransform :: #force_inline proc(self:^Shape, pos:Point3DF, rotation:f32, scale:PointF = {1,1}) {
-    IObject_UpdateTransform(self, pos, rotation, scale)
+Shape_UpdateTransform :: #force_inline proc(self:^Shape, pos:Point3DF, rotation:f32, scale:PointF = {1,1}, pivot:PointF = {0.0,0.0}) {
+    IObject_UpdateTransform(self, pos, rotation, scale, pivot)
 }
 Shape_UpdateTransformMatrixRaw :: #force_inline proc(self:^Shape, _mat:Matrix) {
     IObject_UpdateTransformMatrixRaw(self, _mat)
@@ -738,57 +707,6 @@ _Super_Shape_Draw :: proc (self:^Shape, cmd:vk.CommandBuffer) {
 
     vk.CmdDrawIndexed(cmd, auto_cast (self.__in2.src.__in.indexBuf.buf.option.len / size_of(u32)), 1, 0, 0, 0)
 }
-
-Shape_GetPos :: #force_inline proc "contextless" (self:^Shape) -> Point3DF {
-    return IObject_GetPos(self)
-}
-Shape_GetX :: #force_inline proc "contextless" (self:^Shape) -> f32 {
-    return IObject_GetX(self)
-}
-Shape_GetY :: #force_inline proc "contextless" (self:^Shape) -> f32 {
-    return IObject_GetY(self)
-}
-Shape_GetZ :: #force_inline proc "contextless" (self:^Shape) -> f32 {
-    return IObject_GetZ(self)
-}
-Shape_GetRotation :: #force_inline proc "contextless" (self:^Shape) -> f32 {
-    return IObject_GetRotation(self)
-}
-Shape_GetScale :: #force_inline proc "contextless" (self:^Shape) -> PointF {
-    return IObject_GetScale(self)
-}
-Shape_GetScaleX :: #force_inline proc "contextless" (self:^Shape) -> f32 {
-    return IObject_GetScaleX(self)
-}
-Shape_GetScaleY :: #force_inline proc "contextless" (self:^Shape) -> f32 {
-    return IObject_GetScaleY(self)
-}
-Shape_SetPos :: #force_inline proc (self:^Shape, pos:Point3DF) {
-    IObject_SetPos(self, pos)
-}
-Shape_SetX :: #force_inline proc (self:^Shape, x:f32) {
-    IObject_SetX(self, x)
-}
-Shape_SetY :: #force_inline proc (self:^Shape, y:f32) {
-    IObject_SetY(self, y)
-}
-Shape_SetZ :: #force_inline proc (self:^Shape, z:f32) {
-    IObject_SetZ(self, z)
-}
-Shape_SetRotation :: #force_inline proc (self:^Shape, rotation:f32) {
-    IObject_SetRotation(self, rotation)
-}
-Shape_SetScale :: #force_inline proc (self:^Shape, scale:PointF) {
-    IObject_SetScale(self, scale)
-}
-Shape_SetScaleX :: #force_inline proc (self:^Shape, x:f32) {
-    IObject_SetScaleX(self, x)
-}
-Shape_SetScaleY :: #force_inline proc (self:^Shape, y:f32) {
-    IObject_SetScaleY(self, y)
-}
-
-
 
 //Shape End
 
@@ -833,8 +751,8 @@ Image_GetProjection :: proc "contextless" (self:^Image) -> ^Projection {
 Image_GetColorTransform :: proc "contextless" (self:^Image) -> ^ColorTransform {
     return IObject_GetColorTransform(self)
 }
-Image_UpdateTransform :: #force_inline proc(self:^Image, pos:Point3DF, rotation:f32, scale:PointF = {1,1}) {
-    IObject_UpdateTransform(self, pos, rotation, scale)
+Image_UpdateTransform :: #force_inline proc(self:^Image, pos:Point3DF, rotation:f32, scale:PointF = {1,1}, pivot:PointF = {0.0,0.0}) {
+    IObject_UpdateTransform(self, pos, rotation, scale, pivot)
 }
 Image_UpdateTransformMatrixRaw :: #force_inline proc(self:^Image, _mat:Matrix) {
     IObject_UpdateTransformMatrixRaw(self, _mat)
@@ -850,54 +768,6 @@ Image_UpdateTexture :: #force_inline proc "contextless" (self:^Image, src:^Textu
 }
 Image_UpdateColorTransform :: #force_inline proc(self:^Image, colorTransform:^ColorTransform) {
     IObject_UpdateColorTransform(self, colorTransform)
-}
-Image_GetPos :: #force_inline proc "contextless" (self:^Image) -> Point3DF {
-    return IObject_GetPos(self)
-}
-Image_GetX :: #force_inline proc "contextless" (self:^Image) -> f32 {
-    return IObject_GetX(self)
-}
-Image_GetY :: #force_inline proc "contextless" (self:^Image) -> f32 {
-    return IObject_GetY(self)
-}
-Image_GetZ :: #force_inline proc "contextless" (self:^Image) -> f32 {
-    return IObject_GetZ(self)
-}
-Image_GetRotation :: #force_inline proc "contextless" (self:^Image) -> f32 {
-    return IObject_GetRotation(self)
-}
-Image_GetScale :: #force_inline proc "contextless" (self:^Image) -> PointF {
-    return IObject_GetScale(self)
-}
-Image_GetScaleX :: #force_inline proc "contextless" (self:^Image) -> f32 {
-    return IObject_GetScaleX(self)
-}
-Image_GetScaleY :: #force_inline proc "contextless" (self:^Image) -> f32 {
-    return IObject_GetScaleY(self)
-}
-Image_SetPos :: #force_inline proc (self:^Image, pos:Point3DF) {
-    IObject_SetPos(self, pos)
-}
-Image_SetX :: #force_inline proc (self:^Image, x:f32) {
-    IObject_SetX(self, x)
-}
-Image_SetY :: #force_inline proc (self:^Image, y:f32) {
-    IObject_SetY(self, y)
-}
-Image_SetZ :: #force_inline proc (self:^Image, z:f32) {
-    IObject_SetZ(self, z)
-}
-Image_SetRotation :: #force_inline proc (self:^Image, rotation:f32) {
-    IObject_SetRotation(self, rotation)
-}
-Image_SetScale :: #force_inline proc (self:^Image, scale:PointF) {
-    IObject_SetScale(self, scale)
-}
-Image_SetScaleX :: #force_inline proc (self:^Image, x:f32) {
-    IObject_SetScaleX(self, x)
-}
-Image_SetScaleY :: #force_inline proc (self:^Image, y:f32) {
-    IObject_SetScaleY(self, y)
 }
 
 _Super_Image_Draw :: proc (self:^Image, cmd:vk.CommandBuffer) {
@@ -955,8 +825,8 @@ AnimateImage_GetProjection :: proc "contextless" (self:^AnimateImage) -> ^Projec
 AnimateImage_GetColorTransform :: proc "contextless" (self:^AnimateImage) -> ^ColorTransform {
     return self.__in.colorTransform
 }
-AnimateImage_UpdateTransform :: #force_inline proc(self:^AnimateImage, pos:Point3DF, rotation:f32, scale:PointF = {1,1}) {
-    IObject_UpdateTransform(self, pos, rotation, scale)
+AnimateImage_UpdateTransform :: #force_inline proc(self:^AnimateImage, pos:Point3DF, rotation:f32, scale:PointF = {1,1}, pivot:PointF = {0.0,0.0}) {
+    IObject_UpdateTransform(self, pos, rotation, scale, pivot)
 }
 AnimateImage_UpdateTransformMatrixRaw :: #force_inline proc(self:^AnimateImage, _mat:Matrix) {
     IObject_UpdateTransformMatrixRaw(self, _mat)
@@ -972,54 +842,6 @@ AnimateImage_UpdateTextureArray :: #force_inline proc "contextless" (self:^Anima
 }
 AnimateImage_UpdateProjection :: #force_inline proc(self:^AnimateImage, projection:^Projection) {
     IObject_UpdateProjection(self, projection)
-}
-AnimateImage_GetPos :: #force_inline proc "contextless" (self:^AnimateImage) -> Point3DF {
-    return IObject_GetPos(self)
-}
-AnimateImage_GetX :: #force_inline proc "contextless" (self:^AnimateImage) -> f32 {
-    return IObject_GetX(self)
-}
-AnimateImage_GetY :: #force_inline proc "contextless" (self:^AnimateImage) -> f32 {
-    return IObject_GetY(self)
-}
-AnimateImage_GetZ :: #force_inline proc "contextless" (self:^AnimateImage) -> f32 {
-    return IObject_GetZ(self)
-}
-AnimateImage_GetRotation :: #force_inline proc "contextless" (self:^AnimateImage) -> f32 {
-    return IObject_GetRotation(self)
-}
-AnimateImage_GetScale :: #force_inline proc "contextless" (self:^AnimateImage) -> PointF {
-    return IObject_GetScale(self)
-}
-AnimateImage_GetScaleX :: #force_inline proc "contextless" (self:^AnimateImage) -> f32 {
-    return IObject_GetScaleX(self)
-}
-AnimateImage_GetScaleY :: #force_inline proc "contextless" (self:^AnimateImage) -> f32 {
-    return IObject_GetScaleY(self)
-}
-AnimateImage_SetPos :: #force_inline proc (self:^AnimateImage, pos:Point3DF) {
-    IObject_SetPos(self, pos)
-}
-AnimateImage_SetX :: #force_inline proc (self:^AnimateImage, x:f32) {
-    IObject_SetX(self, x)
-}
-AnimateImage_SetY :: #force_inline proc (self:^AnimateImage, y:f32) {
-    IObject_SetY(self, y)
-}
-AnimateImage_SetZ :: #force_inline proc (self:^AnimateImage, z:f32) {
-    IObject_SetZ(self, z)
-}
-AnimateImage_SetRotation :: #force_inline proc (self:^AnimateImage, rotation:f32) {
-    IObject_SetRotation(self, rotation)
-}
-AnimateImage_SetScale :: #force_inline proc (self:^AnimateImage, scale:PointF) {
-    IObject_SetScale(self, scale)
-}
-AnimateImage_SetScaleX :: #force_inline proc (self:^AnimateImage, x:f32) {
-    IObject_SetScaleX(self, x)
-}
-AnimateImage_SetScaleY :: #force_inline proc (self:^AnimateImage, y:f32) {
-    IObject_SetScaleY(self, y)
 }
 _Super_AnimateImage_Draw :: proc (self:^AnimateImage, cmd:vk.CommandBuffer) {
     xmem.ICheckInit_Check(&self.__in.__in.checkInit)
@@ -1070,8 +892,8 @@ TileImage_GetTileTextureArray :: #force_inline proc "contextless" (self:^TileIma
 TileImage_UpdateTileTextureArray :: #force_inline proc "contextless" (self:^TileImage, src:^TileTextureArray) {
     self.__in2.src = src
 }
-TileImage_UpdateTransform :: #force_inline proc(self:^TileImage, pos:Point3DF, rotation:f32, scale:PointF = {1,1}) {
-    IObject_UpdateTransform(self, pos, rotation, scale)
+TileImage_UpdateTransform :: #force_inline proc(self:^TileImage, pos:Point3DF, rotation:f32, scale:PointF = {1,1}, pivot:PointF = {0.0, 0.0}) {
+    IObject_UpdateTransform(self, pos, rotation, scale, pivot)
 }
 TileImage_UpdateColorTransform :: #force_inline proc(self:^TileImage, colorTransform:^ColorTransform) {
     IObject_UpdateColorTransform(self, colorTransform)
@@ -1093,54 +915,6 @@ TileImage_GetColorTransform :: proc "contextless" (self:^TileImage) -> ^ColorTra
 }
 TileImage_UpdateTransformMatrixRaw :: #force_inline proc(self:^TileImage, _mat:Matrix) {
     IObject_UpdateTransformMatrixRaw(self, _mat)
-}
-TileImage_GetPos :: #force_inline proc "contextless" (self:^TileImage) -> Point3DF {
-    return IObject_GetPos(self)
-}
-TileImage_GetX :: #force_inline proc "contextless" (self:^TileImage) -> f32 {
-    return IObject_GetX(self)
-}
-TileImage_GetY :: #force_inline proc "contextless" (self:^TileImage) -> f32 {
-    return IObject_GetY(self)
-}
-TileImage_GetZ :: #force_inline proc "contextless" (self:^TileImage) -> f32 {
-    return IObject_GetZ(self)
-}
-TileImage_GetRotation :: #force_inline proc "contextless" (self:^TileImage) -> f32 {
-    return IObject_GetRotation(self)
-}
-TileImage_GetScale :: #force_inline proc "contextless" (self:^TileImage) -> PointF {
-    return IObject_GetScale(self)
-}
-TileImage_GetScaleX :: #force_inline proc "contextless" (self:^TileImage) -> f32 {
-    return IObject_GetScaleX(self)
-}
-TileImage_GetScaleY :: #force_inline proc "contextless" (self:^TileImage) -> f32 {
-    return IObject_GetScaleY(self)
-}
-TileImage_SetPos :: #force_inline proc (self:^TileImage, pos:Point3DF) {
-    IObject_SetPos(self, pos)
-}
-TileImage_SetX :: #force_inline proc (self:^TileImage, x:f32) {
-    IObject_SetX(self, x)
-}
-TileImage_SetY :: #force_inline proc (self:^TileImage, y:f32) {
-    IObject_SetY(self, y)
-}
-TileImage_SetZ :: #force_inline proc (self:^TileImage, z:f32) {
-    IObject_SetZ(self, z)
-}
-TileImage_SetRotation :: #force_inline proc (self:^TileImage, rotation:f32) {
-    IObject_SetRotation(self, rotation)
-}
-TileImage_SetScale :: #force_inline proc (self:^TileImage, scale:PointF) {
-    IObject_SetScale(self, scale)
-}
-TileImage_SetScaleX :: #force_inline proc (self:^TileImage, x:f32) {
-    IObject_SetScaleX(self, x)
-}
-TileImage_SetScaleY :: #force_inline proc (self:^TileImage, y:f32) {
-    IObject_SetScaleY(self, y)
 }
 
 _Super_TileImage_Draw :: proc (self:^TileImage, cmd:vk.CommandBuffer) {
@@ -1390,6 +1164,7 @@ ShapeSrc_InitRaw :: proc(self:^ShapeSrc, raw:^RawShape, flag:ResourceUsage = .GP
     rawC := RawShape_Clone(raw, vkDefAllocator)
     __VertexBuf_Init(&self.__in.vertexBuf, rawC.vertices, flag)
     __IndexBuf_Init(&self.__in.indexBuf, rawC.indices, flag)
+    self.rect = rawC.rect
 }
 
 @require_results ShapeSrc_Init :: proc(self:^ShapeSrc, shapes:^Shapes, flag:ResourceUsage = .GPU, colorFlag:ResourceUsage = .CPU) -> (err:ShapesError = .None) {
@@ -1399,6 +1174,8 @@ ShapeSrc_InitRaw :: proc(self:^ShapeSrc, raw:^RawShape, flag:ResourceUsage = .GP
 
     __VertexBuf_Init(&self.__in.vertexBuf, raw.vertices, flag)
     __IndexBuf_Init(&self.__in.indexBuf, raw.indices, flag)
+
+    self.rect = raw.rect
     return
 }
 

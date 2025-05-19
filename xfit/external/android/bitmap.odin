@@ -42,12 +42,12 @@ AndroidBitmapFlagsAlpha :: enum {
     SHIFT    = 0,
 }
 
-AndroidBitmapFlags :: enum {
+AndroidBitmapFlags :: enum (u32) {
     /** If this bit is set in BitmapInfo.flags, the Bitmap uses the
       * HARDWARE Config, and its {@link AHardwareBuffer} can be retrieved via
       * {@link AndroidBitmap_getHardwareBuffer}.
       */
-    IS_HARDWARE = 1 << 31,
+    IS_HARDWARE = u32(1 << 31),
 }
 
 // Note: these values match android.graphics.Bitmap#compressFormat.

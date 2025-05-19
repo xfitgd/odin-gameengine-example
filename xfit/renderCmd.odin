@@ -25,7 +25,7 @@ RenderCmd_Init :: proc() -> ^RenderCmd {
     cmd.scene = make_non_zeroed([dynamic]^IObject)
     cmd.sceneT = make_non_zeroed([dynamic]^IObject)
     for i in 0..<MAX_FRAMES_IN_FLIGHT {
-        //cmd.refresh[i] = false
+        cmd.refresh[i] = false
         cmd.cmds[i] = make_non_zeroed([]vk.CommandBuffer, __swapImgCnt)
         allocInfo := vk.CommandBufferAllocateInfo{
             sType = vk.StructureType.COMMAND_BUFFER_ALLOCATE_INFO,

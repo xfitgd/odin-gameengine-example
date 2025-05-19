@@ -197,7 +197,7 @@ resource_manager_config :: struct {
 	jobQueueCapacity:               u32,       /* The maximum number of jobs that can fit in the queue at a time. Defaults to MA_JOB_TYPE_RESOURCE_MANAGER_QUEUE_CAPACITY. Cannot be zero. */
 	flags:                          u32,
 	pVFS:                           ^vfs,      /* Can be NULL in which case defaults will be used. */
-	ppCustomDecodingBackendVTables: ^[^]decoding_backend_vtable,
+	ppCustomDecodingBackendVTables: [^]^decoding_backend_vtable,
 	customDecodingBackendCount:     u32,
 	pCustomDecodingBackendUserData: rawptr,
 }

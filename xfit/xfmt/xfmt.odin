@@ -6,6 +6,8 @@ import "core:os"
 import "core:sync"
 import "core:debug/trace"
 import "base:runtime"
+import "base:intrinsics"
+import "../external/android"
 
 is_android :: ODIN_PLATFORM_SUBTARGET == .Android
 is_mobile :: is_android
@@ -14,19 +16,23 @@ is_log :: #config(__log__, true)
 LOG_FILE_NAME: string = "xfit_log.log"
 
 Start :: proc() {
-    sync.mutex_lock(&gTraceMtx)
-	defer sync.mutex_unlock(&gTraceMtx)
-    if started do panic("xpanic already started")
-    trace.init(&gTraceCtx)
-    started = true
+	when !is_android {
+		sync.mutex_lock(&gTraceMtx)
+		defer sync.mutex_unlock(&gTraceMtx)
+		if started do panic("xpanic already started")
+		trace.init(&gTraceCtx)
+		started = true
+	}
 }
 
 Destroy :: proc() {
-    sync.mutex_lock(&gTraceMtx)
-	defer sync.mutex_unlock(&gTraceMtx)
-    if !started do panic("xpanic not started")
-    trace.destroy(&gTraceCtx)
-    started = false
+	when !is_android {
+		sync.mutex_lock(&gTraceMtx)
+		defer sync.mutex_unlock(&gTraceMtx)
+		if !started do panic("xpanic not started")
+		trace.destroy(&gTraceCtx)
+		started = false
+	}
 }
 
 @(private) gTraceCtx: trace.Context
@@ -34,50 +40,63 @@ Destroy :: proc() {
 @(private) started: bool = false
 
 printTrace :: proc() {
-	sync.mutex_lock(&gTraceMtx)
-	defer sync.mutex_unlock(&gTraceMtx)
-	if !trace.in_resolve(&gTraceCtx) {
-		buf: [64]trace.Frame
-		frames := trace.frames(&gTraceCtx, 1, buf[:])
-		for f, i in frames {
-			fl := trace.resolve(&gTraceCtx, f, context.temp_allocator)
-			if fl.loc.file_path == "" && fl.loc.line == 0 do continue
-			fmt.printf("%s\n%s called by %s - frame %d\n",
-				fl.loc, fl.procedure, fl.loc.procedure, i)
+	when !is_android {
+		sync.mutex_lock(&gTraceMtx)
+		defer sync.mutex_unlock(&gTraceMtx)
+		if !trace.in_resolve(&gTraceCtx) {
+			buf: [64]trace.Frame
+			frames := trace.frames(&gTraceCtx, 1, buf[:])
+			for f, i in frames {
+				fl := trace.resolve(&gTraceCtx, f, context.allocator)
+				if fl.loc.file_path == "" && fl.loc.line == 0 do continue
+				fmt.printf("%s\n%s called by %s - frame %d\n",
+					fl.loc, fl.procedure, fl.loc.procedure, i)
+			}
 		}
+		fmt.printf("-------------------------------------------------\n")
 	}
-	fmt.printf("-------------------------------------------------\n")
 }
 printTraceBuf :: proc(str:^strings.Builder) {
-	sync.mutex_lock(&gTraceMtx)
-	defer sync.mutex_unlock(&gTraceMtx)
-	if !trace.in_resolve(&gTraceCtx) {
-		buf: [64]trace.Frame
-		frames := trace.frames(&gTraceCtx, 1, buf[:])
-		for f, i in frames {
-			fl := trace.resolve(&gTraceCtx, f, context.temp_allocator)
-			if fl.loc.file_path == "" && fl.loc.line == 0 do continue
-			fmt.sbprintf(str,"%s\n%s called by %s - frame %d\n",
-				fl.loc, fl.procedure, fl.loc.procedure, i)
+	when !is_android {
+		sync.mutex_lock(&gTraceMtx)
+		defer sync.mutex_unlock(&gTraceMtx)
+		if !trace.in_resolve(&gTraceCtx) {
+			buf: [64]trace.Frame
+			frames := trace.frames(&gTraceCtx, 1, buf[:])
+			for f, i in frames {
+				fl := trace.resolve(&gTraceCtx, f, context.allocator)
+				if fl.loc.file_path == "" && fl.loc.line == 0 do continue
+				fmt.sbprintf(str,"%s\n%s called by %s - frame %d\n",
+					fl.loc, fl.procedure, fl.loc.procedure, i)
+			}
 		}
+		fmt.sbprintln(str, "-------------------------------------------------\n")
 	}
-	fmt.sbprintln(str, "-------------------------------------------------\n")
 }
 
 @(cold) panicLog :: proc "contextless" (args: ..any, loc := #caller_location) -> ! {
 	context = runtime.default_context()
-	str: strings.Builder
-	strings.builder_init(&str)
-	fmt.sbprintln(&str,..args)
-	fmt.sbprintf(&str,"%s\n%s called by %s\n",
-		loc,
-		#procedure,
-		loc.procedure)
+	when !is_android {
+		str: strings.Builder
+		strings.builder_init(&str)
+		fmt.sbprintln(&str,..args)
+		fmt.sbprintf(&str,"%s\n%s called by %s\n",
+			loc,
+			#procedure,
+			loc.procedure)
 
-	printTraceBuf(&str)
+		printTraceBuf(&str)
 
-	printToFile(str.buf[:len(str.buf)])
-	panic(string(str.buf[:len(str.buf)]), loc)
+		printToFile(str.buf[:len(str.buf)])
+		panic(string(str.buf[:len(str.buf)]), loc)
+	} else {
+		cstr := fmt.caprint(..args)
+		android.__android_log_write(android.LogPriority.ERROR, ODIN_BUILD_PROJECT_NAME, cstr)
+
+		printToFile((transmute([^]byte)cstr)[:len(cstr)])
+
+		intrinsics.trap()
+	}
 }
 
 @private printToFile :: proc(str:[]byte) {

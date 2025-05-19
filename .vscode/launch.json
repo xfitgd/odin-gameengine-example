@@ -8,10 +8,26 @@
             "type": "lldb",
             "request": "launch",
             "name": "Debug",
-            "program": "bin/test.bin",
+            "program": "bin/test",
             "args": [],
             "cwd": "${workspaceFolder}/bin",
            //"preLaunchTask": "build odin"
+        },
+        {
+            "name": "Android",
+            "type": "android-debug",
+            "request": "launch",
+            "target": "select",
+            "mode": "native", // Change to `java` or `native` to attach only Java or Native debugger.
+            "packageName": "com.example.NativeExample", // Package name for your app.
+            "launchActivity": "android.app.NativeActivity",  // Activity to launch
+            //"apkPath": "${workspaceFolder}/test.apk",
+            "native": {
+                "symbolSearchPaths": [
+                    "${workspaceFolder}/lib/lib/${command:abi}/",
+                ],
+                "abiSupported": ["arm64-v8a"],
+            }
         }
     ]
 }

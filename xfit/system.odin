@@ -17,6 +17,8 @@ import "base:runtime"
 import "xfmt"
 import "xmem"
 
+import "external/android"
+
 //@(private) render_th: ^thread.Thread
 
 @(private) exiting := false
@@ -130,41 +132,58 @@ xfitInit :: proc() {
 	inited = true
 }
 
+//must call start
+when is_android {
+	__androidInit :: proc "contextless" (_app : ^android.android_app) {
+		__android_SetApp(_app)
+	}
+}
+
 xfitMain :: proc(
 	_windowTitle:cstring = "xfit",
 	_windowX:Maybe(i32) = nil,
 	_windowY:Maybe(i32) = nil,
 	_windowWidth:Maybe(u32) = nil,
 	_windowHeight:Maybe(u32) = nil,
+	_vSync:VSync = .Double,
 ) {
 	if(!inited) do panic("call xfitInit first!")
 
 	__windowTitle = _windowTitle
-	__windowX = _windowX
-	__windowY = _windowY
-	__windowWidth = _windowWidth
-	__windowHeight = _windowHeight
-
-	windowStart()
-
-	vkStart()
-
-	Init()
-
-	for !exiting {
-		systemLoop()
+	when is_android {
+		__windowX = 0
+		__windowY = 0
+	} else {
+		__windowX = _windowX
+		__windowY = _windowY
+		__windowWidth = _windowWidth
+		__windowHeight = _windowHeight
 	}
+	__vSync = _vSync
 
-	vkWaitDeviceIdle()
+	when is_android {
+		androidStart()
+	} else {
+		windowStart()
 
-	Destroy()
+		vkStart()
 
-	vkDestory()
+		Init()
 
-	systemDestroy()
+		for !exiting {
+			systemLoop()
+		}
 
-	systemAfterDestroy()
+		vkWaitDeviceIdle()
 
+		Destroy()
+
+		vkDestory()
+
+		systemDestroy()
+
+		systemAfterDestroy()
+	}
 }
 
 @(private) systemLoop :: proc() {
@@ -243,12 +262,34 @@ DestroyTrackAllocator :: proc() {
 
 
 when is_android {
-	//TODO
+	print :: proc(args: ..any, sep := " ", flush := true) -> int {
+		_ = flush
+		cstr := fmt.caprint(..args, sep=sep)
+		defer delete(cstr)
+		return auto_cast android.__android_log_write(android.LogPriority.INFO, ODIN_BUILD_PROJECT_NAME, cstr)
+	}
+	println  :: print
+	printf   :: proc(_fmt: string, args: ..any, flush := true) -> int {
+		_ = flush
+		cstr := fmt.caprintf(_fmt, ..args)
+		defer delete(cstr)
+		return auto_cast android.__android_log_write(android.LogPriority.INFO, ODIN_BUILD_PROJECT_NAME, cstr)
+	}
+	printfln :: printf
+	printCustomAndroid :: proc(args: ..any, logPriority: android.LogPriority = .INFO, sep := " ") -> int {
+		cstr := fmt.caprint(..args, sep=sep)
+		defer delete(cstr)
+		return auto_cast android.__android_log_write(logPriority, ODIN_BUILD_PROJECT_NAME, cstr)
+	}
 } else {
 	println :: fmt.println
 	printfln :: fmt.printfln
 	printf :: fmt.printf
 	print :: fmt.print
+	printCustomAndroid :: proc(args: ..any, logPriority: android.LogPriority = .INFO, sep := " ") -> int {
+		_ = logPriority
+		return print(..args, sep = sep)
+	}
 }
 
 // @(private) CreateRenderFuncThread :: proc() {
@@ -303,8 +344,6 @@ when is_android {
 
 	if !Paused_ {
 		vkDrawFrame()
-		//vkWaitGraphicsIdle()
-		//vkOpExecuteDestroy()
 	}
 }
 
@@ -323,6 +362,38 @@ SecondToNanoSecond :: #force_inline proc "contextless" (_int: $T, _dec: T) -> T 
 
 SecondToNanoSecond2 :: #force_inline proc "contextless" (_sec: $T, _milisec: T, _usec: T, _nsec: T) -> T where intrinsics.type_is_integer(T) {
     return _sec * 1000000000 + _milisec * 1000000 + _usec * 1000 + _nsec
+}
+
+Android_AssetFileError :: enum {
+	None,
+	Err
+}
+
+when is_android {
+	Android_AssetReadFile :: proc(path:string, allocator := context.allocator) -> (data:[]u8, err:Android_AssetFileError = .None) {
+		pathT := strings.clone_to_cstring(path, context.temp_allocator)
+		defer delete(pathT, context.temp_allocator)
+		
+		asset := android.AAssetManager_open(android_GetAssetManager(), pathT, .BUFFER)
+		__size := android.AAsset_getLength64(asset)
+
+		data = make_non_zeroed_slice([]u8, auto_cast __size, allocator)
+
+		__read : type_of(__size) = 0
+		for __read < __size {
+			i := android.AAsset_read(asset, auto_cast &data[__read], auto_cast(__size - __read))
+			if i < 0 {
+				delete(data)
+				err = .Err
+				break
+			} else if i == 0 {
+				break
+			}
+			__read += auto_cast i
+		}
+		android.AAsset_close(asset)
+		return
+	}
 }
 
 make_non_zeroed :: proc {

@@ -7,6 +7,28 @@ import "core:math/linalg"
 import "base:runtime"
 import "base:intrinsics"
 
+
+Trianguate_Error :: enum {
+    None,
+    Edge_P1_Equal_P2,
+    Triangle_MarkNeighbor2_target_not_a_neighbor,
+    Triangle_PointCW_point_not_in_triangle,
+    Triangle_PointCCW_point_not_in_triangle,
+    Triangle_Index_point_not_in_triangle,
+    Triangle_Legalize_opoint_not_in_triangle,
+    AdvancingFront_LocatePoint_point_not_found,
+    EdgeEvent2_nil_triangle,
+    EdgeEvent2_collinear_points_not_supported,
+    FlipEdgeEvent_nil_triangle,
+    FlipEdgeEvent_nil_neighbor_across,
+    Opposing_point_on_constrained_edge,//!Unsupported
+    FlipScanEdgeEvent_nil_neighbor_across,
+    FlipScanEdgeEvent_nil_opposing_point,
+    FlipScanEdgeEvent_nil_on_either_of_points,
+    nil_node,
+}
+
+
 @(private = "file") kAlpha : f32 : 0.3
 @(private = "file") Triangle :: struct {
     pts: [3]^PointE,
@@ -81,11 +103,12 @@ import "base:intrinsics"
     return AdvancingFront{head = head, tail = tail, search = head}
 }
 
-@(private = "file") PointE_Init :: proc(point: PointF, id:u32, allocator: runtime.Allocator) -> PointE {
-    return PointE{x = point.x, y = point.y, id = id, edges = make_non_zeroed_dynamic_array([dynamic]^Edge, allocator)}
+@(private = "file") PointE_Init :: proc(point: PointF, id:u32) -> PointE {
+    return PointE{x = point.x, y = point.y, id = id, edges = make_non_zeroed_dynamic_array([dynamic]^Edge, context.temp_allocator)}
 }
 
-@(private = "file") Edge_Init :: proc(p1, p2: ^PointE, out:^Edge) {
+
+@(require_results, private = "file") Edge_Init :: proc(p1, p2: ^PointE, out:^Edge) -> (err:Trianguate_Error = .None) {
     p: ^PointE = p1
     q: ^PointE = p2
     if (p1.y > p2.y) {
@@ -96,11 +119,14 @@ import "base:intrinsics"
             q = p1
             p = p2
         } else if (p1.x == p2.x) {
-            panicLog("Edge::Edge: p1 == p2")
+            err = .Edge_P1_Equal_P2
+            return
         }
     } 
     non_zero_append(&q.edges, out)
     out^ = Edge{p = p, q = q}
+
+    return
 }
 
 @(private = "file") Triangle_MarkNeighbor2 :: proc "contextless"(self, target: ^Triangle, p1, p2: ^PointE) {
@@ -150,20 +176,20 @@ import "base:intrinsics"
     return Triangle_Contains(self, p) && Triangle_Contains(self, q)
 }
 
-@(private = "file") Triangle_PointCW :: proc "contextless" (self: ^Triangle, p: ^PointE) -> ^PointE {
-    if self.pts[0] == p do return self.pts[2]
-    else if self.pts[1] == p do return self.pts[0]
-    else if self.pts[2] == p do return self.pts[1]
+@(require_results, private = "file") Triangle_PointCW :: proc "contextless" (self: ^Triangle, p: ^PointE) -> (^PointE, Trianguate_Error) {
+    if self.pts[0] == p do return self.pts[2], .None
+    else if self.pts[1] == p do return self.pts[0], .None
+    else if self.pts[2] == p do return self.pts[1], .None
     
-    panicLog("Triangle_PointCW: point not in triangle")
+    return nil, .Triangle_PointCW_point_not_in_triangle
 }
 
-@(private = "file") Triangle_PointCCW :: proc "contextless" (self: ^Triangle, p: ^PointE) -> ^PointE {
-    if self.pts[0] == p do return self.pts[1]
-    else if self.pts[1] == p do return self.pts[2]
-    else if self.pts[2] == p do return self.pts[0]
+@(require_results, private = "file") Triangle_PointCCW :: proc "contextless" (self: ^Triangle, p: ^PointE) ->(^PointE, Trianguate_Error) {
+    if self.pts[0] == p do return self.pts[1], .None
+    else if self.pts[1] == p do return self.pts[2], .None
+    else if self.pts[2] == p do return self.pts[0], .None
     
-    panicLog("Triangle_PointCCW: point not in triangle")
+     return nil, .Triangle_PointCCW_point_not_in_triangle
 }
 
 @(private = "file") Triangle_NeighborCW :: proc "contextless" (self: ^Triangle, p: ^PointE) -> ^Triangle {
@@ -258,17 +284,18 @@ import "base:intrinsics"
     }
 }
 
-@(private = "file") Triangle_OppositePoint :: #force_inline proc "contextless" (self, t: ^Triangle, p: ^PointE) -> ^PointE {
-    cw := Triangle_PointCW(t, p)
-    return Triangle_PointCW(self, cw)
+@(require_results, private = "file") Triangle_OppositePoint :: #force_inline proc "contextless" (self, t: ^Triangle, p: ^PointE) -> (res:^PointE, err:Trianguate_Error) {
+    cw := Triangle_PointCW(t, p) or_return
+    res = Triangle_PointCW(self, cw) or_return
+    return 
 }
 
-@(private = "file") Triangle_Index :: #force_inline proc "contextless" (self: ^Triangle, p: ^PointE) -> int {
-    if self.pts[0] == p do return 0
-    else if self.pts[1] == p do return 1
-    else if self.pts[2] == p do return 2
+@(require_results, private = "file") Triangle_Index :: #force_inline proc "contextless" (self: ^Triangle, p: ^PointE) -> (int, Trianguate_Error) {
+    if self.pts[0] == p do return 0, .None
+    else if self.pts[1] == p do return 1, .None
+    else if self.pts[2] == p do return 2, .None
     
-    panicLog("Triangle_Index: point not in triangle")
+    return -1, .Triangle_Index_point_not_in_triangle
 }
 
 @(private = "file") Basin :: struct {
@@ -432,18 +459,19 @@ import "base:intrinsics"
     return node
 }
 
-@(private = "file") MapTriangleToNodes :: proc "contextless" (ctx: ^TriangleCtx, t: ^Triangle) {
+@(require_results, private = "file") MapTriangleToNodes :: proc "contextless" (ctx: ^TriangleCtx, t: ^Triangle) -> (err:Trianguate_Error = .None) {
     for i in 0..<3 {
         if t.neighbors[i] == nil {
-            n := AdvancingFront_LocatePoint(&ctx.front, Triangle_PointCW(t, t.pts[i]))
+            n := AdvancingFront_LocatePoint(&ctx.front, Triangle_PointCW(t, t.pts[i]) or_return)
             if n != nil {
                 n.triangle = t
             }
         }
     }
+    return
 }
 
-@(private = "file") Legalize :: proc "contextless" (ctx: ^TriangleCtx, t: ^Triangle) -> bool {
+@(private = "file") Legalize :: proc "contextless" (ctx: ^TriangleCtx, t: ^Triangle) -> (res : bool, err : Trianguate_Error = .None) {
     for i in 0..<3 {
         if t.delaunayEdge[i] {
             continue
@@ -452,16 +480,16 @@ import "base:intrinsics"
         ot := t.neighbors[i]
         if ot != nil {
             p := t.pts[i]
-            op := Triangle_OppositePoint(ot, t, p)
-            oi := Triangle_Index(ot, op)
+            op := Triangle_OppositePoint(ot, t, p) or_return
+            oi := Triangle_Index(ot, op) or_return
 
             if ot.constrainedEdge[oi] || ot.delaunayEdge[oi] {
                 t.constrainedEdge[i] = ot.constrainedEdge[oi]
                 continue
             }
 
-            tcw := Triangle_PointCW(t, p)
-            tccw := Triangle_PointCCW(t, p)
+            tcw := Triangle_PointCW(t, p) or_return
+            tccw := Triangle_PointCCW(t, p) or_return
             inside := InCircle(p, tccw, tcw, op)
 
             if inside {
@@ -470,24 +498,28 @@ import "base:intrinsics"
 
                 RotateTrianglePair(t, p, ot, op)
 
-                notLegalized := !Legalize(ctx, t)
+                notLegalized := Legalize(ctx, t) or_return
+                notLegalized = !notLegalized
                 if notLegalized {
-                    MapTriangleToNodes(ctx, t)
+                    MapTriangleToNodes(ctx, t) or_return
                 }
 
-                notLegalized = !Legalize(ctx, ot)
+                notLegalized = Legalize(ctx, ot) or_return
+                notLegalized = !notLegalized
                 if notLegalized {
-                    MapTriangleToNodes(ctx, ot)
+                    MapTriangleToNodes(ctx, ot) or_return
                 }
 
                 t.delaunayEdge[i] = false
                 ot.delaunayEdge[oi] = false
 
-                return true
+                res = true
+                return
             }  
         }
     }
-    return false
+    res = false
+    return
 }
 
 @(private = "file") Triangle_EdgeIndex :: proc "contextless" (self: ^Triangle, p1, p2: ^PointE) -> int {
@@ -639,17 +671,18 @@ import "base:intrinsics"
     return .CW
 }
 
-@(private = "file") EdgeEvent :: proc (ctx: ^TriangleCtx, e: ^Edge, node: ^Node) {
+@(require_results, private = "file") EdgeEvent :: proc (ctx: ^TriangleCtx, e: ^Edge, node: ^Node) -> (err:Trianguate_Error = .None) {
     ctx.edgeEvents.constrainedEdge = e
     ctx.edgeEvents.right = e.p.x > e.q.x
 
     if IsEdgeSideOfTriangle(node.triangle, e.p, e.q) do return
     
     FillEdgeEvent(ctx, e, node)
-    EdgeEvent2(ctx, e.p, e.q, node.triangle, e.q)
+    EdgeEvent2(ctx, e.p, e.q, node.triangle, e.q) or_return
+    return
 }
 
-@(private = "file") EdgeEvent2 :: proc "contextless" (ctx: ^TriangleCtx, ep, eq: ^PointE, triangle: ^Triangle, point: ^PointE) {
+@(require_results, private = "file") EdgeEvent2 :: proc "contextless" (ctx: ^TriangleCtx, ep, eq: ^PointE, triangle: ^Triangle, point: ^PointE) -> (err:Trianguate_Error = .None) {
     triangle_ := triangle
     if triangle_ == nil {
         panicLog("EdgeEvent2 - null triangle")
@@ -657,30 +690,30 @@ import "base:intrinsics"
     
     if IsEdgeSideOfTriangle(triangle_, ep, eq) do return
 
-    p1 := Triangle_PointCCW(triangle_, point)
+    p1 := Triangle_PointCCW(triangle_, point) or_return
     o1 := Orient2d(eq, p1, ep)
     if o1 == .COLLINEAR {
         if Triangle_Contains2(triangle_, eq, p1) {
             Triangle_MarkConstrainedEdge(triangle_, eq, p1)
             ctx.edgeEvents.constrainedEdge.q = p1
             triangle_ = Triangle_NeighborAcross(triangle_, point)
-            EdgeEvent2(ctx, ep, p1, triangle_, p1)
+            EdgeEvent2(ctx, ep, p1, triangle_, p1) or_return
         } else {
-            panicLog("EdgeEvent - collinear points not supported")
+            err = .EdgeEvent2_collinear_points_not_supported
         }
         return
     }
 
-    p2 := Triangle_PointCW(triangle_, point)
+    p2 := Triangle_PointCW(triangle_, point) or_return
     o2 := Orient2d(eq, p2, ep)
     if o2 == .COLLINEAR {
         if Triangle_Contains2(triangle_, eq, p2) {
             Triangle_MarkConstrainedEdge(triangle_, eq, p2)
             ctx.edgeEvents.constrainedEdge.q = p2
             triangle_ = Triangle_NeighborAcross(triangle_, point)
-            EdgeEvent2(ctx, ep, p2, triangle_, p2)
+            EdgeEvent2(ctx, ep, p2, triangle_, p2) or_return
         } else {
-            panicLog("EdgeEvent - collinear points not supported")
+             err = .EdgeEvent2_collinear_points_not_supported
         }
         return
     }
@@ -691,35 +724,36 @@ import "base:intrinsics"
         } else {
             triangle_ = Triangle_NeighborCW(triangle_, point)
         }
-        EdgeEvent2(ctx, ep, eq, triangle_, point)
+        EdgeEvent2(ctx, ep, eq, triangle_, point) or_return
     } else {
         if triangle_ == nil {
-            panicLog("EdgeEvent2 - null triangle")
+            err = .EdgeEvent2_nil_triangle
         }
-        FlipEdgeEvent(ctx, ep, eq, triangle_, point)
+        FlipEdgeEvent(ctx, ep, eq, triangle_, point) or_return
     }
+    return
 }
 
-@(private = "file") FlipEdgeEvent :: proc "contextless" (ctx: ^TriangleCtx, ep, eq: ^PointE, t: ^Triangle, p: ^PointE) {
+@(private = "file") FlipEdgeEvent :: proc "contextless" (ctx: ^TriangleCtx, ep, eq: ^PointE, t: ^Triangle, p: ^PointE) -> (err:Trianguate_Error = .None) {
     t_ := t
     if t_ == nil do panicLog("FlipEdgeEvent - null triangle")
     
     ot := Triangle_NeighborAcross(t_, p)
     if ot == nil do panicLog("FlipEdgeEvent - null neighbor across")
     
-    op := Triangle_OppositePoint(ot, t_, p)
+    op := Triangle_OppositePoint(ot, t_, p) or_return
   
-    if InScanArea(p, Triangle_PointCCW(t_, p), Triangle_PointCW(t_, p), op) {
+    if InScanArea(p, Triangle_PointCCW(t_, p) or_return, Triangle_PointCW(t_, p) or_return, op) {
         RotateTrianglePair(t_, p, ot, op)
-        MapTriangleToNodes(ctx, t_)
-        MapTriangleToNodes(ctx, ot)
+        MapTriangleToNodes(ctx, t_) or_return
+        MapTriangleToNodes(ctx, ot) or_return
   
         if p == eq && op == ep {
             if eq == ctx.edgeEvents.constrainedEdge.q && ep == ctx.edgeEvents.constrainedEdge.p {
                 Triangle_MarkConstrainedEdge(t_, ep, eq)
                 Triangle_MarkConstrainedEdge(ot, ep, eq)
-                Legalize(ctx, t_)
-                Legalize(ctx, ot)
+                Legalize(ctx, t_) or_return
+                Legalize(ctx, ot) or_return
             }
         } else {
             o := Orient2d(eq, op, ep)
@@ -727,10 +761,11 @@ import "base:intrinsics"
             FlipEdgeEvent(ctx, ep, eq, t_, p)
         }
     } else {
-        newP := NextFlipPoint(ep, eq, ot, op)
-        FlipScanEdgeEvent(ctx, ep, eq, t_, ot, newP)
-        EdgeEvent2(ctx, ep, eq, t_, p)
+        newP := NextFlipPoint(ep, eq, ot, op) or_return
+        FlipScanEdgeEvent(ctx, ep, eq, t_, ot, newP) or_return
+        EdgeEvent2(ctx, ep, eq, t_, p) or_return
     }
+    return
 }
 
 @(private = "file") NextFlipTriangle :: proc "contextless" (ctx: ^TriangleCtx, o: Orientation, t: ^Triangle, ot: ^Triangle, p: ^PointE, op: ^PointE) -> ^Triangle {
@@ -758,42 +793,47 @@ import "base:intrinsics"
     }
 }
 
-@(private = "file") NextFlipPoint :: proc "contextless" (ep, eq: ^PointE, ot: ^Triangle, op: ^PointE) -> ^PointE {
+@(require_results, private = "file") NextFlipPoint :: proc "contextless" (ep, eq: ^PointE, ot: ^Triangle, op: ^PointE) -> (res:^PointE, err:Trianguate_Error = .None) {
     o2d := Orient2d(eq, op, ep)
     if o2d == .CW {
         return Triangle_PointCCW(ot, op)
     } else if o2d == .CCW {
         return Triangle_PointCW(ot, op)
     }
-    panicLog("[Unsupported] Opposing point on constrained edge")
+    err = .Opposing_point_on_constrained_edge
+    return
 }
 
-@(private = "file") FlipScanEdgeEvent :: proc "contextless" (ctx: ^TriangleCtx, ep, eq: ^PointE, flipTriangle, t: ^Triangle, p: ^PointE) {
+@(require_results, private = "file") FlipScanEdgeEvent :: proc "contextless" (ctx: ^TriangleCtx, ep, eq: ^PointE, flipTriangle, t: ^Triangle, p: ^PointE) -> (err:Trianguate_Error = .None) {
     ot_ptr := Triangle_NeighborAcross(t, p)
     if ot_ptr == nil {
-        panicLog("FlipScanEdgeEvent - null neighbor across")
+        err = .FlipScanEdgeEvent_nil_neighbor_across
+        return
     }
 
-    op_ptr := Triangle_OppositePoint(ot_ptr, t, p)
+    op_ptr := Triangle_OppositePoint(ot_ptr, t, p) or_return
     if op_ptr == nil {
-        panicLog("FlipScanEdgeEvent - null opposing point")
+       err = .FlipScanEdgeEvent_nil_opposing_point
+        return
     }
 
-    p1 := Triangle_PointCCW(flipTriangle, eq)
-    p2 := Triangle_PointCW(flipTriangle, eq)
+    p1 := Triangle_PointCCW(flipTriangle, eq) or_return
+    p2 := Triangle_PointCW(flipTriangle, eq) or_return
     if p1 == nil || p2 == nil {
-        panicLog("FlipScanEdgeEvent - null on either of points")
+        err = .FlipScanEdgeEvent_nil_on_either_of_points
+        return
     }
 
     ot := ot_ptr
     op := op_ptr
 
     if InScanArea(eq, p1, p2, op) {
-        FlipEdgeEvent(ctx, eq, op, ot, op)
+        FlipEdgeEvent(ctx, eq, op, ot, op) or_return
     } else {
-        newP := NextFlipPoint(ep, eq, ot, op)
-        FlipScanEdgeEvent(ctx, ep, eq, flipTriangle, ot, newP)
+        newP := NextFlipPoint(ep, eq, ot, op) or_return
+        FlipScanEdgeEvent(ctx, ep, eq, flipTriangle, ot, newP) or_return
     }
+    return
 }
 
 @(private = "file") InScanArea :: proc "contextless" (pa,pb,pc,pd: ^PointE) -> bool {
@@ -809,7 +849,7 @@ import "base:intrinsics"
     return true
 }
 
-TrianguateSinglePolygon :: proc(poly:[]PointF, baseIdx:[]u32, holes:[][]PointF = nil, allocator := context.allocator) -> (indices:[]u32) {
+TrianguateSinglePolygon :: proc(poly:[]PointF, baseIdx:[]u32, holes:[][]PointF = nil, allocator := context.allocator) -> (indices:[]u32, err:Trianguate_Error = .None) {
     ctx := TriangleCtx{allocator = allocator}
    
     if holes == nil {
@@ -848,28 +888,28 @@ TrianguateSinglePolygon :: proc(poly:[]PointF, baseIdx:[]u32, holes:[][]PointF =
     _baseIdx := 0
 
     for p, i in poly {
-        ctx.ptsData[i] = PointE_Init(p, u32(i) + baseIdx[_baseIdx], context.temp_allocator)
+        ctx.ptsData[i] = PointE_Init(p, u32(i) + baseIdx[_baseIdx])
         ctx.pts[i] = &ctx.ptsData[i] 
     }
     _baseIdx += 1
 
     for _, i in poly {
         j := i < len(poly) - 1 ? i + 1 : 0
-        Edge_Init(ctx.pts[i], ctx.pts[j], &ctx.edges[i])
+        Edge_Init(ctx.pts[i], ctx.pts[j], &ctx.edges[i]) or_return
     }
 
     if holes != nil {
         idx := len(poly)
         for hole in holes {
             for p, i in hole {
-                ctx.ptsData[idx + i] = PointE_Init(p, u32(i) + baseIdx[_baseIdx], context.temp_allocator)
+                ctx.ptsData[idx + i] = PointE_Init(p, u32(i) + baseIdx[_baseIdx])
                 ctx.pts[idx + i] = &ctx.ptsData[idx + i]
             }
             _baseIdx += 1
         
             for _, i in hole {
                 j := i < len(hole) - 1 ? i + 1 : 0
-                Edge_Init(ctx.pts[i + idx], ctx.pts[j + idx], &ctx.edges[i + idx])
+                Edge_Init(ctx.pts[i + idx], ctx.pts[j + idx], &ctx.edges[i + idx]) or_return
             }
 
             idx += len(hole)
@@ -891,8 +931,8 @@ TrianguateSinglePolygon :: proc(poly:[]PointF, baseIdx:[]u32, holes:[][]PointF =
     dx:f32 = kAlpha * (ctx.xmax - ctx.xmin)
     dy:f32 = kAlpha * (ctx.ymax - ctx.ymin)
 
-    head :PointE = PointE_Init(PointF{ ctx.xmin - dx, ctx.ymin - dy }, max(u32), context.temp_allocator)//!not use id
-    tail :PointE = PointE_Init(PointF{ ctx.xmax + dx, ctx.ymin - dy }, max(u32), context.temp_allocator)
+    head :PointE = PointE_Init(PointF{ ctx.xmin - dx, ctx.ymin - dy }, max(u32))//!not use id
+    tail :PointE = PointE_Init(PointF{ ctx.xmax + dx, ctx.ymin - dy }, max(u32))
     defer {
         delete(head.edges)
         delete(tail.edges)
@@ -939,8 +979,9 @@ TrianguateSinglePolygon :: proc(poly:[]PointF, baseIdx:[]u32, holes:[][]PointF =
         node.next.prev = &ctx.nodes[i-1]
         node.next = &ctx.nodes[i-1]
 
-        if !Legalize(&ctx, tri) {
-            MapTriangleToNodes(&ctx, tri)
+        if Legalize(&ctx, tri) or_return {
+        } else {
+            MapTriangleToNodes(&ctx, tri) or_return
         }
 
         if ctx.pts[i].x <= node.point.x + epsilon(f32) {
@@ -949,7 +990,7 @@ TrianguateSinglePolygon :: proc(poly:[]PointF, baseIdx:[]u32, holes:[][]PointF =
 
         FillAdvancingFront(&ctx, &ctx.nodes[i-1])
         for e in ctx.pts[i].edges {
-            EdgeEvent(&ctx, e, &ctx.nodes[i-1])
+            EdgeEvent(&ctx, e, &ctx.nodes[i-1]) or_return
         }
     }
 
@@ -992,7 +1033,7 @@ TrianguateSinglePolygon :: proc(poly:[]PointF, baseIdx:[]u32, holes:[][]PointF =
     return
 }
 
-@(private = "file") Fill :: proc (ctx: ^TriangleCtx, node: ^Node) {
+@(private = "file") Fill :: proc (ctx: ^TriangleCtx, node: ^Node) -> (err:Trianguate_Error = .None) {
     triangle := new_clone(Triangle{pts = [3]^PointE{node.prev.point, node.point, node.next.point}}, context.temp_allocator)
 
     non_zero_append(&ctx.maps, triangle)
@@ -1004,9 +1045,11 @@ TrianguateSinglePolygon :: proc(poly:[]PointF, baseIdx:[]u32, holes:[][]PointF =
     node.prev.next = node.next
     node.next.prev = node.prev
 
-    if !Legalize(ctx, triangle) {
-        MapTriangleToNodes(ctx, triangle)
+    if Legalize(ctx, triangle) or_return {
+    } else {
+        MapTriangleToNodes(ctx, triangle) or_return
     }
+    return
 }
 
 @(private = "file") FillAdvancingFront :: proc(ctx: ^TriangleCtx, node: ^Node) {
@@ -1180,7 +1223,7 @@ TrianguateSinglePolygon :: proc(poly:[]PointF, baseIdx:[]u32, holes:[][]PointF =
 }
 
 
-TrianguatePolygons :: proc(poly:[]PointF,  nPoly:[]u32, allocator := context.allocator) -> (indices:[]u32) {
+TrianguatePolygons :: proc(poly:[]PointF,  nPoly:[]u32, allocator := context.allocator) -> (indices:[]u32, err:Trianguate_Error = .None) {
     indices_ := make_non_zeroed_dynamic_array([dynamic]u32, allocator)
     
     idx :u32 = 0
@@ -1188,8 +1231,8 @@ TrianguatePolygons :: proc(poly:[]PointF,  nPoly:[]u32, allocator := context.all
         isHole := GetPolygonOrientation( poly[idx:idx+nPoly[n]]) == .Clockwise
 
         if !isHole {
-            holes := make_non_zeroed_dynamic_array([dynamic][]PointF, context.temp_allocator )
-            holeIndices := make_non_zeroed_dynamic_array([dynamic]u32, context.temp_allocator )
+            holes := make_non_zeroed_dynamic_array([dynamic][]PointF, context.temp_allocator)
+            holeIndices := make_non_zeroed_dynamic_array([dynamic]u32, context.temp_allocator)
             defer delete(holes)
             defer delete(holeIndices)
 
@@ -1208,19 +1251,19 @@ TrianguatePolygons :: proc(poly:[]PointF,  nPoly:[]u32, allocator := context.all
             }
 
             if len(holes) == 0 {
-                indicesT := TrianguateSinglePolygon(poly[idx:idx+nPoly[n]], {idx},nil, allocator)
-                defer delete(indicesT, allocator)
+                indicesT := TrianguateSinglePolygon(poly[idx:idx+nPoly[n]], {idx},nil, context.temp_allocator) or_return
+                defer delete(indicesT, context.temp_allocator)
 
                 non_zero_append(&indices_, ..indicesT)
             } else {
-                baseIdx := make_non_zeroed_slice([]u32, len(holeIndices) + 1, context.temp_allocator )
-                defer delete(baseIdx, context.temp_allocator )
+                baseIdx := make_non_zeroed_slice([]u32, len(holeIndices) + 1, context.temp_allocator)
+                defer delete(baseIdx, context.temp_allocator)
 
                 baseIdx[0] = idx
                 intrinsics.mem_copy_non_overlapping(&baseIdx[1], &holeIndices[0], len(holeIndices) * size_of(u32))
 
-                indicesT := TrianguateSinglePolygon(poly[idx:idx+nPoly[n]], baseIdx,holes[:], allocator)
-                defer delete(indicesT, allocator)
+                indicesT := TrianguateSinglePolygon(poly[idx:idx+nPoly[n]], baseIdx,holes[:], context.temp_allocator) or_return
+                defer delete(indicesT, context.temp_allocator)
 
                 non_zero_append(&indices_, ..indicesT)
             }

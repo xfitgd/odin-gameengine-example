@@ -84,7 +84,20 @@ main :: proc() {
 
 		if is_android {
 			android_paths := (json_data.(json.Object)["android-paths"]).(json.Object)
-			os.make_directory("android-bin")
+			os2.make_directory("android")
+			os2.make_directory("android/lib")
+			os2.make_directory("android/lib/lib")
+
+			os2.make_directory("android/lib/lib/arm64-v8a")
+			err := os2.copy_file("android/lib/lib/arm64-v8a/libVkLayer_khronos_validation.so", "xfit/lib/android/libVkLayer_khronos_validation.so")
+			if err != nil {
+				fmt.panicf("libVkLayer_khronos_validation copy_file: %s", err)
+			}
+			defer os2.remove("android/lib/lib/arm64-v8a/libVkLayer_khronos_validation.so")
+			// os2.make_directory("android/lib/lib/armeabi-v7a")//!only supports arm64 now
+			// os2.make_directory("android/lib/lib/x86_64")
+			// os2.make_directory("android/lib/lib/x86")
+			// os2.make_directory("android/lib/lib/riscv64")
 
 			targets :[]string = {
 				"-target:linux_arm64",
@@ -93,38 +106,70 @@ main :: proc() {
 				"-target:linux_i386",
 				"-target:linux_riscv64",
 			}
-			outPaths :[]string = {
-				"-out:android-bin/arm64.so",
-				"-out:android-bin/arm32.so",
-				"-out:android-bin/amd64.so",
-				"-out:android-bin/i386.so",
-				"-out:android-bin/riscv64.so",
+			outSos :[]string = {
+				strings.join({"android/lib/lib/arm64-v8a/lib", setting["main-package"].(json.String), ".so"}, "", context.temp_allocator),
+				strings.join({"android/lib/lib/armeabi-v7a/lib", setting["main-package"].(json.String), ".so"}, "", context.temp_allocator),
+				strings.join({"android/lib/lib/x86_64/lib", setting["main-package"].(json.String), ".so"}, "", context.temp_allocator),
+				strings.join({"android/lib/lib/x86/lib", setting["main-package"].(json.String), ".so"}, "", context.temp_allocator),
+				strings.join({"android/lib/lib/riscv64/lib", setting["main-package"].(json.String), ".so"}, "", context.temp_allocator),
 			}
 
 			ndkPath := android_paths["ndk"].(json.String)
+			sdkPath := android_paths["sdk"].(json.String)
+
+			ODIN_ANDROID_SDK := strings.join({"ODIN_ANDROID_SDK=", sdkPath}, "", context.temp_allocator)
+			ODIN_ANDROID_NDK := strings.join({"ODIN_ANDROID_NDK=", ndkPath}, "", context.temp_allocator)
+			ODIN_ANDROID_NDK_TOOLCHAIN := strings.join({"ODIN_ANDROID_NDK_TOOLCHAIN=", ndkPath, "/toolchains/llvm/prebuilt/linux-x86_64"}, "", context.temp_allocator)
+
+			builded := false
 
 			for target, i in targets {
 				if !runCmd({"odin", "build", 
-				setting["main-package-path"].(json.String), 
+				setting["main-package"].(json.String), 
 				"-no-bounds-check" if !debug else ({}),
-				outPaths[i], 
+				strings.join({"-out:", outSos[i]}, "", context.temp_allocator), 
 				o, 
 				"-debug" if debug else ({}),
+				//"-show-system-calls" if debug else ({}),
 				//"-sanitize:address" if debug else ({}),
 				"-build-mode:shared",
 				target,
 				"-subtarget:android",
+				//"-extra-linker-flags:\"-L lib/lib/arm64-v8a -lVkLayer_khronos_validation\"" if debug else ({}),
 				}, {
-					strings.join({"ODIN_ANDROID_NDK=", ndkPath}, "", context.temp_allocator),
-					strings.join({"ODIN_ANDROID_NDK_TOOLCHAIN=", ndkPath, "/toolchains/llvm/prebuilt/linux-x86_64"}, "", context.temp_allocator),
+					ODIN_ANDROID_SDK,
+					ODIN_ANDROID_NDK,
+					ODIN_ANDROID_NDK_TOOLCHAIN,
 				}) {
 					return
 				}
+
+				//?"$ANDROID_JBR/bin/keytool" -genkey -v -keystore .keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000
+				if !runCmd({"odin", "bundle", "android", "android", "-android-keystore:android/debug.keystore", "-android-keystore-password:\"android\"",
+				}, {
+					ODIN_ANDROID_SDK,
+					ODIN_ANDROID_NDK,
+					ODIN_ANDROID_NDK_TOOLCHAIN,
+				}) {
+					return
+				}
+
+				builded = true
+
+				os2.copy_file(strings.join({setting["out-path"].(json.String), ".apk"}, "", context.temp_allocator),
+				 "test.apk")
+
+				break//!only supports arm64 now
 			}
-			
+
+			if builded {
+				os2.remove("test.apk")
+				os2.remove("test.apk-build")
+				os2.remove("test.apk.idsig")
+			}	
 		} else {
 			if !runCmd({"odin", "build", 
-			setting["main-package-path"].(json.String), 
+			setting["main-package"].(json.String), 
 			"-no-bounds-check" if !debug else ({}),
 			out_path, 
 			o, 

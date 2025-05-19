@@ -8,6 +8,8 @@ import "../ogg"
 import "../opus"
 
 foreign import lib {
+    opusfile.LIBOPUSFILE,
+    opus.LIBOPUS,
 	LIB,
 }
 
@@ -57,6 +59,7 @@ foreign lib {
     libopus_get_cursor_in_pcm_frames :: proc (pOpus: ^libopus, pCursor: ^u64) -> result ---
     
     libopus_get_length_in_pcm_frames :: proc (pOpus: ^libopus, pLength: ^u64) -> result ---
-
-    decoding_backend_vtable_libopus : ^decoding_backend_vtable
+}
+foreign lib {
+    ma_decoding_backend_libopus : ^decoding_backend_vtable
 }

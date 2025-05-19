@@ -1,7 +1,5 @@
 package xfit
 
-//TODO
-
 import "core:math"
 import "core:slice"
 import "core:fmt"
@@ -12,6 +10,7 @@ import "base:intrinsics"
 RawShape :: struct {
     vertices : []ShapeVertex2D,
     indices:[]u32,
+    rect:RectF
 }
 
 CurveType :: enum {
@@ -33,6 +32,23 @@ CurveType :: enum {
 
 ShapesError :: enum {
     None,
+    Edge_P1_Equal_P2,
+    Triangle_MarkNeighbor2_target_not_a_neighbor,
+    Triangle_PointCW_point_not_in_triangle,
+    Triangle_PointCCW_point_not_in_triangle,
+    Triangle_Index_point_not_in_triangle,
+    Triangle_Legalize_opoint_not_in_triangle,
+    AdvancingFront_LocatePoint_point_not_found,
+    EdgeEvent2_nil_triangle,
+    EdgeEvent2_collinear_points_not_supported,
+    FlipEdgeEvent_nil_triangle,
+    FlipEdgeEvent_nil_neighbor_across,
+    Opposing_point_on_constrained_edge,//!Unsupported
+    FlipScanEdgeEvent_nil_neighbor_across,
+    FlipScanEdgeEvent_nil_opposing_point,
+    FlipScanEdgeEvent_nil_on_either_of_points,
+    nil_node,
+
     IsPointNotLine,
     IsNotCurve,
     InvaildLine,
@@ -95,6 +111,8 @@ RawShape_Clone :: proc (self:^RawShape, allocator := context.allocator) -> (res:
     res.indices = make_non_zeroed_slice([]u32, len(self.indices), allocator)
     intrinsics.mem_copy_non_overlapping(&res.vertices[0], &self.vertices[0], len(self.vertices) * size_of(ShapeVertex2D))
     intrinsics.mem_copy_non_overlapping(&res.indices[0], &self.indices[0], len(self.indices) * size_of(u32))
+
+    res.rect = self.rect
     return
 }
 
@@ -122,7 +140,7 @@ GetCubicCurveType :: proc "contextless" (_start:[2]$T, _control0:[2]T, _control1
     D := 3 * outD[1] * outD[1] - 4 * outD[2] * outD[0]
     discr := outD[0] * outD[0] * D
 
-    if discr == 0.0 {
+    if discr >= 0 - epsilon(T) && discr <= 0 + epsilon(T) {
         if outD[0] == 0.0 && outD[1] == 0.0 {
             if outD[2] == 0.0 {
                 type = .Line
@@ -328,7 +346,7 @@ LineSplitLine :: proc "contextless" (pts:[2][$N]$T, t:T) -> (outPts1:[2][N]T, ou
                         ltMinusLs * mtMinusMs,  -(ltMinusLs * ltMinusLs) * mtMinusMs,   -ltMinusLs * mtMinusMs * mtMinusMs, 1,
                     }
           
-                    reverse = (outD[0] > 0.0 && F[0,0] < 0.0) || (outD[0] < 0.0 && F[0,0] > 0.0)
+                    reverse = (outD[0] > 0.0 && F[1,0] < 0.0) || (outD[0] < 0.0 && F[1,0] > 0.0)
                 }
             case .Cusp:
                 ls := outD[2]
@@ -515,7 +533,7 @@ Shapes_ComputePolygon :: proc(poly:^Shapes, allocator := context.allocator) -> (
     vertList:[dynamic]ShapeVertex2D = make_non_zeroed_dynamic_array([dynamic]ShapeVertex2D, allocator)
     indList:[dynamic]u32 = make_non_zeroed_dynamic_array([dynamic]u32, allocator)
     outPoly:[][dynamic]CurveStruct = make_non_zeroed_slice([][dynamic]CurveStruct, len(poly.nPolys), context.temp_allocator)
-    outPoly2:[dynamic]PointF = make_non_zeroed_dynamic_array([dynamic]PointF, context.temp_allocator)
+    outPoly2:[dynamic]PointF = make_non_zeroed_dynamic_array([dynamic]PointF, context.temp_allocator )
     outPoly2N:[]u32 = make_non_zeroed_slice([]u32, len(poly.nPolys), context.temp_allocator)
     for &o in outPoly {
         o = make_non_zeroed_dynamic_array([dynamic]CurveStruct, context.temp_allocator)
@@ -580,7 +598,7 @@ Shapes_ComputePolygon :: proc(poly:^Shapes, allocator := context.allocator) -> (
     for ps, psi in outPoly {
         np :u32 = 0
 
-        pT := make_non_zeroed_dynamic_array([dynamic]PointF, context.temp_allocator)
+        pT := make_non_zeroed_dynamic_array([dynamic]PointF, context.temp_allocator )
         defer delete(pT)
         for p in ps {
             if !p.isCurve {
@@ -610,10 +628,16 @@ Shapes_ComputePolygon :: proc(poly:^Shapes, allocator := context.allocator) -> (
         outPoly2N[psi] = np
     }
 
-    res.indices = TrianguatePolygons(outPoly2[:], outPoly2N[:], allocator)
+    tErr : Trianguate_Error
+    res.indices, tErr = TrianguatePolygons(outPoly2[:], outPoly2N[:], allocator)
     defer if err != .None {
         delete(res.indices, allocator)
     }
+    if tErr != .None {
+        err = auto_cast tErr
+        return
+    }
+   
     start = 0
     vLen :u32 = auto_cast len(vertList)//Existing Curve Vertices Length
     for _, i in outPoly2N {

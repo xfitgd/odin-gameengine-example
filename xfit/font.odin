@@ -1,6 +1,5 @@
 package xfit
 
-//TODO
 
 import "core:math"
 import "core:c"
@@ -125,22 +124,27 @@ Font_SetScale :: proc(self:^Font, scale:f32) {
 _renderOpt:FontRenderOpt2,
 vertList:^[dynamic]ShapeVertex2D,
 indList:^[dynamic]u32,
-allocator : runtime.Allocator) {
+allocator : runtime.Allocator) -> (rect:RectF, err:ShapesError = .None) {
     i : int = 0
     opt := _renderOpt.opt
+    rectT : RectF
+    rect = Rect_Init(f32(0.0), 0.0, 0.0, 0.0)
 
     for r in _renderOpt.ranges {
         opt.scale = _renderOpt.opt.scale * r.scale
         opt.color = r.color
 
         if r.len == 0 || i + auto_cast r.len >= len(_str) {
-            _Font_RenderString(auto_cast r.font, _str[i:], opt, vertList, indList, allocator)
+            _, rectT = _Font_RenderString(auto_cast r.font, _str[i:], opt, vertList, indList, allocator) or_return
+            rect = Rect_Or(rect, rectT)
             break;
         } else {
-            opt.offset = _Font_RenderString(auto_cast r.font, _str[i:i + auto_cast r.len], opt, vertList, indList, allocator)
+            opt.offset, rectT = _Font_RenderString(auto_cast r.font, _str[i:i + auto_cast r.len], opt, vertList, indList, allocator) or_return
+            rect = Rect_Or(rect, rectT)
             i += auto_cast r.len
         }
-    }   
+    }
+    return
 }
 
 @(private="file") _Font_RenderString :: proc(self:^__Font,
@@ -148,7 +152,7 @@ allocator : runtime.Allocator) {
     _renderOpt:FontRenderOpt,
     _vertArr:^[dynamic]ShapeVertex2D,
     _indArr:^[dynamic]u32,
-    allocator : runtime.Allocator) -> PointF {
+    allocator : runtime.Allocator) -> (pt:PointF, rect:RectF, err:ShapesError = .None) {
 
     maxP : PointF = {min(f32), min(f32)}
     minP : PointF = {max(f32), max(f32)}
@@ -165,8 +169,7 @@ allocator : runtime.Allocator) {
         }
         minP = min_array(minP, offset)
 
-        //TODO ERR Check
-        _ = _Font_RenderChar(self, s, _vertArr, _indArr, &offset, _renderOpt.area, _renderOpt.scale, _renderOpt.color, allocator)
+        _Font_RenderChar(self, s, _vertArr, _indArr, &offset, _renderOpt.area, _renderOpt.scale, _renderOpt.color, allocator) or_return
         
         maxP = max_array(maxP, PointF{offset.x, offset.y + f32(self.face.size.metrics.height) / (64.0 * self.scale) })
     }
@@ -174,12 +177,20 @@ allocator : runtime.Allocator) {
 
     size : PointF = _renderOpt.area != nil ? _renderOpt.area.? : (maxP - minP) * PointF{1,1}
 
+    maxP = {min(f32), min(f32)}
+    minP = {max(f32), max(f32)}
+
     for &v in _vertArr^ {
         v.pos -= _renderOpt.pivot * size * _renderOpt.scale
         v.pos += _renderOpt.offset
-    }
 
-    return offset * _renderOpt.scale + _renderOpt.offset
+        minP = min_array(minP, v.pos)
+        maxP = max_array(maxP, v.pos)
+    }
+    rect = Rect_Init_LTRB(minP.x, maxP.x, minP.y, maxP.y)
+
+    pt = offset * _renderOpt.scale + _renderOpt.offset
+    return
 }
 
 @(private="file") _Font_RenderChar :: proc(self:^__Font,
@@ -308,21 +319,21 @@ allocator : runtime.Allocator) {
             }
         
             poly : Shapes = {
-                nPolys = make_non_zeroed([]u32, self.face.glyph.outline.n_contours, context.temp_allocator),
-                nTypes = make_non_zeroed([]u32, self.face.glyph.outline.n_contours, context.temp_allocator),
-                types = make_non_zeroed([]CurveType, self.face.glyph.outline.n_points*3, context.temp_allocator),
-                poly = make_non_zeroed([]PointF, self.face.glyph.outline.n_points*3, context.temp_allocator),
-                colors = make_non_zeroed([]Point3DwF, self.face.glyph.outline.n_contours, context.temp_allocator),
+                nPolys = make_non_zeroed([]u32, self.face.glyph.outline.n_contours),
+                nTypes = make_non_zeroed([]u32, self.face.glyph.outline.n_contours),
+                types = make_non_zeroed([]CurveType, self.face.glyph.outline.n_points*3),
+                poly = make_non_zeroed([]PointF, self.face.glyph.outline.n_points*3),
+                colors = make_non_zeroed([]Point3DwF, self.face.glyph.outline.n_contours),
             }
             for &c in poly.colors {
                 c = Point3DwF{0,0,0,1}//?no matter
             }
             defer {
-                delete(poly.nPolys, context.temp_allocator)
-                delete(poly.nTypes, context.temp_allocator)
-                delete(poly.types, context.temp_allocator)
-                delete(poly.poly, context.temp_allocator)
-                delete(poly.colors, context.temp_allocator)
+                delete(poly.nPolys, )
+                delete(poly.nTypes, )
+                delete(poly.types, )
+                delete(poly.poly, )
+                delete(poly.colors, )
             }
             data : FontUserData = {
                 polygon = &poly,
@@ -352,8 +363,8 @@ allocator : runtime.Allocator) {
 
                 poly.nPolys[data.nPoly] = data.nPolyLen
                 poly.nTypes[data.nTypes] = data.nTypesLen
-                poly.poly = resize_non_zeroed_slice(poly.poly, data.idx, context.temp_allocator)
-                poly.types = resize_non_zeroed_slice(poly.types, data.typeIdx, context.temp_allocator)
+                poly.poly = resize_non_zeroed_slice(poly.poly, data.idx, )
+                poly.types = resize_non_zeroed_slice(poly.types, data.typeIdx, )
                
                 poly.strokeColors = nil
                 poly.thickness = nil
@@ -411,32 +422,34 @@ allocator : runtime.Allocator) {
     return
 }
 
-Font_RenderString2 :: proc(_str:string, _renderOpt:FontRenderOpt2, allocator := context.allocator) -> RawShape {
+Font_RenderString2 :: proc(_str:string, _renderOpt:FontRenderOpt2, allocator := context.allocator) -> (res:^RawShape, err:ShapesError = .None)  {
     vertList := make_non_zeroed_dynamic_array([dynamic]ShapeVertex2D, allocator)
     indList := make_non_zeroed_dynamic_array([dynamic]u32, allocator)
 
-    _Font_RenderString2(_str, _renderOpt, &vertList, &indList, allocator)
+    _Font_RenderString2(_str, _renderOpt, &vertList, &indList, allocator) or_return
     shrink(&vertList)
     shrink(&indList)
-    raw : RawShape = {
+    res = new (RawShape, allocator)
+    res^ = {
         vertices = vertList[:],
         indices = indList[:],
     }
-    return raw
+    return
 }
 
-Font_RenderString :: proc(self:^Font, _str:string, _renderOpt:FontRenderOpt, allocator := context.allocator) -> ^RawShape {
+Font_RenderString :: proc(self:^Font, _str:string, _renderOpt:FontRenderOpt, allocator := context.allocator) -> (res:^RawShape, err:ShapesError = .None) {
     vertList := make_non_zeroed_dynamic_array([dynamic]ShapeVertex2D, allocator)
     indList := make_non_zeroed_dynamic_array([dynamic]u32, allocator)
 
-    _Font_RenderString(auto_cast self, _str, _renderOpt, &vertList, &indList, allocator)
+    _, rect := _Font_RenderString(auto_cast self, _str, _renderOpt, &vertList, &indList, allocator) or_return
 
     shrink(&vertList)
     shrink(&indList)
-    raw : ^RawShape = new (RawShape, allocator)
-    raw^ = {
+    res = new (RawShape, allocator)
+    res^ = {
         vertices = vertList[:],
         indices = indList[:],
+        rect = rect,
     }
-    return raw
+    return
 }
