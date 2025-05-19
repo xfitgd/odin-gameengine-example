@@ -1,6 +1,6 @@
 {
     "setting" : {
-        "is-android" : true,
+        "is-android" : false,
         "main-package" : "vulkanexample",
         "out-path" : "bin/test",
         "build-type" : "minimal"

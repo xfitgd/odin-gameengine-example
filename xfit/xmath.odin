@@ -155,6 +155,15 @@ Rect_PointIn :: #force_inline proc "contextless" (_r: Rect_($T), p: [2]T) -> boo
 	return true
 }
 
+Rect_Move :: #force_inline proc "contextless" (_r: Rect_($T), p: [2]T) -> Rect_(T) #no_bounds_check {
+	res: Rect_(T)
+	for _, i in _r.pos {
+		res.pos[i] = _r.pos[i] + p[i]
+	}
+	return res
+}
+
+
 splat_2 :: proc "contextless" (scalar:$T) -> [2]T where intrinsics.type_is_numeric(T) {
 	return { 0..<2 = scalar }
 }
@@ -177,26 +186,26 @@ epsilonEqual :: proc "contextless" (a:$T, b:T) -> bool where intrinsics.type_is_
 
 
 PointInTriangle :: proc "contextless" (p : [2]$T, a : [2]T, b : [2]T, c : [2]T) -> bool where intrinsics.type_is_float(T){
-	x0 := c.x - a.x;
-	y0 := c.y - a.y;
-	x1 := b.x - a.x;
-	y1 := b.y - a.y;
-	x2 := p.x - a.x;
-	y2 := p.y - a.y;
+	x0 := c.x - a.x
+	y0 := c.y - a.y
+	x1 := b.x - a.x
+	y1 := b.y - a.y
+	x2 := p.x - a.x
+	y2 := p.y - a.y
 
-	dot00 := x0 * x0 + y0 * y0;
-	dot01 := x0 * x1 + y0 * y1;
-	dot02 := x0 * x2 + y0 * y2;
-	dot11 := x1 * x1 + y1 * y1;
-	dot12 := x1 * x2 + y1 * y2;
-	denominator := dot00 * dot11 - dot01 * dot01;
-	if (denominator == 0.0) do return false;
+	dot00 := x0 * x0 + y0 * y0
+	dot01 := x0 * x1 + y0 * y1
+	dot02 := x0 * x2 + y0 * y2
+	dot11 := x1 * x1 + y1 * y1
+	dot12 := x1 * x2 + y1 * y2
+	denominator := dot00 * dot11 - dot01 * dot01
+	if (denominator == 0.0) do return false
 	// Compute
-	inverseDenominator := 1.0 / denominator;
-	u := (dot11 * dot02 - dot01 * dot12) * inverseDenominator;
-	v := (dot00 * dot12 - dot01 * dot02) * inverseDenominator;
+	inverseDenominator := 1.0 / denominator
+	u := (dot11 * dot02 - dot01 * dot12) * inverseDenominator
+	v := (dot00 * dot12 - dot01 * dot02) * inverseDenominator
 
-	return (u > 0.0) && (v > 0.0) && (u + v < 1.0);
+	return (u > 0.0) && (v > 0.0) && (u + v < 1.0)
 }
 
 PointInLine :: proc "contextless" (p:[2]$T, l0:[2]T, l1:[2]T) -> (bool, T) where intrinsics.type_is_float(T) {

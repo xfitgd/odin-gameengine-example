@@ -7,7 +7,7 @@
     "enable_hover": true,
     "enable_snippets": true,
     "enable_format" : true,
-    "enable_checker_only_saved" : false,
+    "enable_checker_only_saved" : true,
     "enable_inlay_hints": true,
     "enable_inlay_hints_default_params": true,
     "enable_inlay_hints_params": true,

@@ -189,6 +189,14 @@ allocator : runtime.Allocator) -> (rect:RectF, err:ShapesError = .None) {
     }
     rect = Rect_Init_LTRB(minP.x, maxP.x, minP.y, maxP.y)
 
+    subX :f32 = rect.x + rect.size.x / 2.0
+    subY :f32 = rect.y + rect.size.y / 2.0
+    for &v in _vertArr^ {
+        v.pos.x -= subX
+        v.pos.y -= subY
+    }
+    rect = Rect_Move(rect, PointF{subX, subY})
+
     pt = offset * _renderOpt.scale + _renderOpt.offset
     return
 }

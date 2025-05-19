@@ -61,11 +61,11 @@ Init ::proc() {
         scale = xfit.PointF{3,3},
     }
 
-    rawText, shapeErr := xfit.Font_RenderString(font, "겜이나 만들자", renderOpt)
+    rawText, shapeErr := xfit.Font_RenderString(font, "You And I", renderOpt, context.temp_allocator)
     if shapeErr != .None {
         xfit.panicLog(shapeErr)
     }
-    defer xfit.RawShape_Free(rawText)
+    defer xfit.RawShape_Free(rawText, context.temp_allocator)
 
     xfit.ShapeSrc_InitRaw(&shapeSrc, rawText)
 
@@ -73,7 +73,7 @@ Init ::proc() {
     xfit.Projection_InitMatrixOrthoWindow(&proj, CANVAS_W, CANVAS_H)
 
     xfit.Shape_Init(shape, xfit.Shape, &shapeSrc, {-0.0, 0, 10}, math.to_radians_f32(45.0), {3, 3}, &camera, &proj,
-    pivot = {-shapeSrc.rect.size.x / 2.0 * 3.0, 0.0})
+    pivot = {0.0, 0.0})
 
     xfit.RenderCmd_AddObject(renderCmd, shape)
     
