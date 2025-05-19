@@ -2,9 +2,7 @@ package miniaudio
 
 import "core:c"
 
-foreign import lib {
-	LIB,
-}
+foreign import lib { LIB }
 
 /************************************************************************************************************************************************************
 
@@ -28,7 +26,7 @@ foreign lib {
 
 
 decoding_backend_vtable :: struct {
-	onInit:          proc "c" (pUserData: rawptr, onRead: ma_read_proc, onSeek: ma_seek_proc, onTell: ma_tell_proc, pReadSeekTellUserData: rawptr, pConfig: ^decoding_backend_config, pAllocationCallbacks: ^allocation_callbacks, ppBackend: ^^data_source) -> result,
+	onInit:          proc "c" (pUserData: rawptr, onRead: decoder_read_proc, onSeek: decoder_seek_proc, onTell: decoder_tell_proc, pReadSeekTellUserData: rawptr, pConfig: ^decoding_backend_config, pAllocationCallbacks: ^allocation_callbacks, ppBackend: ^^data_source) -> result,
 	onInitFile:      proc "c" (pUserData: rawptr, pFilePath: cstring, pConfig: ^decoding_backend_config, pAllocationCallbacks: ^allocation_callbacks, ppBackend: ^^data_source) -> result,               	 /* Optional. */
 	onInitFileW:     proc "c" (pUserData: rawptr, pFilePath: [^]c.wchar_t, pConfig: ^decoding_backend_config, pAllocationCallbacks: ^allocation_callbacks, ppBackend: ^^data_source) -> result,            /* Optional. */
 	onInitMemory:    proc "c" (pUserData: rawptr, pData: rawptr, dataSize: c.size_t, pConfig: ^decoding_backend_config, pAllocationCallbacks: ^allocation_callbacks, ppBackend: ^^data_source) -> result,  /* Optional. */
@@ -73,7 +71,7 @@ decoder :: struct  {
 	pInputCache:            rawptr,            /* In input format. Can be null if it's not needed. */
 	inputCacheCap:          u64,               /* The capacity of the input cache. */
 	inputCacheConsumed:     u64,               /* The number of frames that have been consumed in the cache. Used for determining the next valid frame. */
-	inputCacheRemaining:    u64,               /* The number of valid frames remaining in the cahce. */
+	inputCacheRemaining:    u64,               /* The number of valid frames remaining in the cache. */
 	allocationCallbacks:    allocation_callbacks,
 	data: struct #raw_union {
 		vfs: struct {
@@ -113,7 +111,7 @@ foreign lib {
 	decoder_read_pcm_frames :: proc(pDecoder: ^decoder, pFramesOut: rawptr, frameCount: u64, pFramesRead: ^u64) -> result ---
 
 	/*
-	Seeks to a PCM frame based on it's absolute index.
+	Seeks to a PCM frame based on its absolute index.
 
 	This is not thread safe without your own synchronization.
 	*/
