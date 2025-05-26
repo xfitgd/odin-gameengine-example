@@ -6,7 +6,7 @@
         {
             "label": "build odin",
             "type": "shell",
-            "command": "build_tool.bin",
+            "command": "build_tool",
             "problemMatcher": [],
             "group": {
                 "kind": "build",
