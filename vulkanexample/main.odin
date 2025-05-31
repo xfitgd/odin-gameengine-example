@@ -2,6 +2,7 @@ package vulkanexample
 
 import "core:fmt"
 import "core:mem"
+import "core:thread"
 import "core:math"
 import "core:math/linalg"
 import "core:math/geometry"
@@ -31,7 +32,14 @@ bgSndSrc : ^sound.SoundSrc
 bgSnd : ^sound.Sound
 
 bgSndFileData:[]u8
-imgData:[]u8
+
+
+Image2_Init :: proc(self:^engine.Image, src:^engine.Texture, pos:linalg.Point3DF,
+camera:^engine.Camera, projection:^engine.Projection,
+rotation:f32 = 0.0, scale:linalg.PointF = {1,1}, colorTransform:^engine.ColorTransform = nil) {
+    engine.Image_Init(auto_cast self, engine.Image, src, pos, camera, projection, rotation, scale, colorTransform)
+}
+
 
 Init ::proc() {
     renderCmd = engine.RenderCmd_Init()
@@ -107,32 +115,37 @@ Init ::proc() {
     //Image Test
     img: ^engine.Image = engine.AllocObject(engine.Image)
 
-    imgFileData, imgFileReadErr := os2.read_entire_file_from_path("xbox.webp", context.temp_allocator)
+    imgFileData, imgFileReadErr := os2.read_entire_file_from_path("panda.png", context.temp_allocator)
     defer delete(imgFileData, context.temp_allocator)
     if imgFileReadErr != nil {
         trace.panic_log(imgFileReadErr)
     }
 
-    webpD : engine.webp_decoder
-    defer engine.webp_decoder_deinit(&webpD)
-    errCode := engine.webp_decoder_load_header(&webpD, imgFileData, .RGBA)
-    if errCode != 0 {
+    pngD :^engine.png_decoder = new(engine.png_decoder, engine.defAllocator())
+
+    imgData, errCode := engine.image_converter_load(pngD, imgFileData, .RGBA, engine.defAllocator())
+    if errCode != nil {
         trace.panic_log(errCode)
     }
+    engine.Texture_Init(&texture, engine.image_converter_width(pngD), engine.image_converter_height(pngD), imgData)
 
-    imgData = mem.make_non_zeroed_slice([]u8, engine.webp_decoder_size(&webpD))
-    errCode = engine.webp_decoder_decode(&webpD, imgData)
-    if errCode != 0 {
-        trace.panic_log(errCode)
-    }
-
-    engine.Texture_Init(&texture, engine.webp_decoder_width(&webpD), engine.webp_decoder_height(&webpD), imgData)
-
-    engine.Image_Init(img, engine.Image, &texture,  {-0.0, 0, 10}, &camera, &proj)
+    Image2_Init(img, &texture,  {-0.0, 0, 10}, &camera, &proj)
     engine.RenderCmd_AddObject(renderCmd, img)
 
     //Show
     engine.RenderCmd_Show(renderCmd)
+
+    WaitThread :: proc(data:rawptr) {
+        engine.GraphicsWaitAllOps()
+
+        engine.image_converter_deinit(cast(^engine.png_decoder)data)
+        free(data, engine.defAllocator())
+    }
+    thread.create_and_start_with_data(pngD, WaitThread, self_cleanup = true)
+
+    // engine.GraphicsWaitAllOps()
+
+    // engine.webp_decoder_deinit(webpD)
 }
 Update ::proc() {
     
@@ -153,7 +166,7 @@ Destroy ::proc() {
     //sound.SoundSrc_Deinit(bgSndSrc)
     //delete(bgSndFileData)
 
-    delete(imgData)
+    //engine.webp_decoder_deinit(&webpD)
 }
 
 
