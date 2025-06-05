@@ -49,51 +49,51 @@ Init ::proc() {
     engine.Projection_InitMatrixOrthoWindow(&proj, CANVAS_W, CANVAS_H)
 
     //Font Test
-    // shape: ^engine.Shape = engine.AllocObject(engine.Shape)
+    shape: ^engine.Shape = engine.AllocObject(engine.Shape)
 
-    // fontFileData:[]u8
-    // defer delete(fontFileData, context.temp_allocator)
+    fontFileData:[]u8
+    defer delete(fontFileData, context.temp_allocator)
 
-    // when engine.is_android {
-    //     fontFileReadErr : engine.Android_AssetFileError
-    //     fontFileData, fontFileReadErr = engine.Android_AssetReadFile("omyu pretty.ttf", context.temp_allocator)
-    //     if fontFileReadErr != .None {
-    //         trace.panic_log(fontFileReadErr)
-    //     }
-    // } else {
-    //     fontFileReadErr :os2.Error
-    //     fontFileData, fontFileReadErr = os2.read_entire_file_from_path("omyu pretty.ttf", context.temp_allocator)
-    //     if fontFileReadErr != nil {
-    //         trace.panic_log(fontFileReadErr)
-    //     }
-    // }
+    when engine.is_android {
+        fontFileReadErr : engine.Android_AssetFileError
+        fontFileData, fontFileReadErr = engine.Android_AssetReadFile("omyu pretty.ttf", context.temp_allocator)
+        if fontFileReadErr != .None {
+            trace.panic_log(fontFileReadErr)
+        }
+    } else {
+        fontFileReadErr :os2.Error
+        fontFileData, fontFileReadErr = os2.read_entire_file_from_path("omyu pretty.ttf", context.temp_allocator)
+        if fontFileReadErr != nil {
+            trace.panic_log(fontFileReadErr)
+        }
+    }
 
-    // freeTypeErr : font.FreetypeErr
-    // ft, freeTypeErr = font.Font_Init(fontFileData, 0)
-    // if freeTypeErr != .Ok {
-    //     trace.panic_log(freeTypeErr)
-    // }
+    freeTypeErr : font.FreetypeErr
+    ft, freeTypeErr = font.Font_Init(fontFileData, 0)
+    if freeTypeErr != .Ok {
+        trace.panic_log(freeTypeErr)
+    }
 
-    // //engine.Font_SetScale(font, 1)
+    //engine.Font_SetScale(font, 1)
 
-    // renderOpt := font.FontRenderOpt{
-    //     color = linalg.Point3DwF{1,1,1,1},
-    //     flag = .GPU,
-    //     scale = linalg.PointF{3,3},
-    // }
+    renderOpt := font.FontRenderOpt{
+        color = linalg.Point3DwF{1,1,1,1},
+        flag = .GPU,
+        scale = linalg.PointF{3,3},
+    }
 
-    // rawText, shapeErr := font.Font_RenderString(ft, "놀면서 개발", renderOpt, context.temp_allocator)
-    // if shapeErr != .None {
-    //     trace.panic_log(shapeErr)
-    // }
-    // defer geometry.RawShape_Free(rawText, context.temp_allocator)
+    rawText, shapeErr := font.Font_RenderString(ft, "놀면서 개발", renderOpt, context.temp_allocator)
+    if shapeErr != .None {
+        trace.panic_log(shapeErr)
+    }
+    defer geometry.RawShape_Free(rawText, context.temp_allocator)
 
-    // engine.ShapeSrc_InitRaw(&shapeSrc, rawText)
+    engine.ShapeSrc_InitRaw(&shapeSrc, rawText)
 
-    // engine.Shape_Init(shape, engine.Shape, &shapeSrc, {-0.0, 0, 10}, &camera, &proj, math.to_radians_f32(45.0), {3, 3},
-    // pivot = {0.0, 0.0})
+    engine.Shape_Init(shape, engine.Shape, &shapeSrc, {-0.0, 0, 10}, &camera, &proj, math.to_radians_f32(45.0), {3, 3},
+    pivot = {0.0, 0.0})
 
-    // engine.RenderCmd_AddObject(renderCmd, shape)
+    engine.RenderCmd_AddObject(renderCmd, shape)
 
     //Sound Test
     // when engine.is_android {
@@ -147,7 +147,7 @@ Size :: proc() {
     engine.Projection_UpdateOrthoWindow(&proj, CANVAS_W, CANVAS_H)
 }
 Destroy ::proc() {
-    //engine.ShapeSrc_Deinit(&shapeSrc)
+    engine.ShapeSrc_Deinit(&shapeSrc)
     engine.Texture_Deinit(&texture)
     len := engine.RenderCmd_GetObjectLen(renderCmd)
     for i in 0..<len {
