@@ -114,15 +114,9 @@ Init ::proc() {
     // bgSnd, _ = sound.SoundSrc_PlaySoundMemory(bgSndSrc, 0.2, true)
 
     //Image Test
-    imgFileData, imgFileReadErr := os2.read_entire_file_from_path("panda.png", context.temp_allocator)
-    defer delete(imgFileData, context.temp_allocator)
-    if imgFileReadErr != nil {
-        trace.panic_log(imgFileReadErr)
-    }
-
     pngD :^engine.png_decoder = new(engine.png_decoder, engine.defAllocator())
 
-    imgData, errCode := engine.image_converter_load(pngD, imgFileData, .RGBA, engine.defAllocator())
+    imgData, errCode := engine.image_converter_load_file(pngD, "panda.png", .RGBA)
     if errCode != nil {
         trace.panic_log(errCode)
     }
