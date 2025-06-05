@@ -6,12 +6,12 @@ import "core:thread"
 import "core:math"
 import "core:math/rand"
 import "core:math/linalg"
-import "core:math/geometry"
 import "core:reflect"
 import "core:os/os2"
 import "vendor:engine"
 import "vendor:engine/font"
 import "vendor:engine/sound"
+import "vendor:engine/geometry"
 import "core:debug/trace"
 
 is_android :: engine.is_android
