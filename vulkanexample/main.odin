@@ -132,8 +132,9 @@ Init ::proc() {
 
     img: ^GUI_Image = engine.AllocObject(GUI_Image)
     img.gui_scale = {1.0, 1.0}
+    img.gui_rotation = math.to_radians_f32(45.0)
     img.gui_align_x = .left
-    img.gui_center_pt.x = 200.0
+    img.gui_pos.x = 200.0
 
     
     GUI_Image_Init(img, &texture,  &camera, &proj)
