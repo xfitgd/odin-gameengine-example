@@ -41,13 +41,13 @@ camera:^engine.Camera, projection:^engine.Projection,
 colorTransform:^engine.ColorTransform = nil) {
     engine.Image_Init2(auto_cast self, GUI_Image, src, camera, projection, colorTransform)
 
-    gui.gui_component_size(self)
+    gui.gui_component_size(self, &self.com)
 }
 
 
 GUI_Image :: struct {
     using _:engine.Image,
-    using _:gui.gui_component,
+    com:gui.gui_component,
 }
 
 Init ::proc() {
@@ -131,11 +131,10 @@ Init ::proc() {
     engine.Texture_Init(&texture, engine.image_converter_width(pngD), engine.image_converter_height(pngD), imgData)
 
     img: ^GUI_Image = engine.AllocObject(GUI_Image)
-    img.gui_scale = {1.0, 1.0}
-    img.gui_rotation = math.to_radians_f32(45.0)
-    img.gui_align_x = .left
-    img.gui_pos.x = 200.0
-
+    img.com.gui_scale = {1.0, 1.0}
+    img.com.gui_rotation = math.to_radians_f32(45.0)
+    img.com.gui_align_x = .left
+    img.com.gui_pos.x = 200.0
     
     GUI_Image_Init(img, &texture,  &camera, &proj)
     
@@ -161,7 +160,10 @@ Update ::proc() {
 }
 Size :: proc() {
     engine.Projection_UpdateOrthoWindow(&proj, CANVAS_W, CANVAS_H)
-    gui.gui_component_size( (^GUI_Image)(engine.RenderCmd_GetObject(renderCmd, 1)))
+    
+    gui_img := (^GUI_Image)(engine.RenderCmd_GetObject(renderCmd, 1))
+
+    gui.gui_component_size(gui_img, &gui_img.com)
 }
 Destroy ::proc() {
     engine.ShapeSrc_Deinit(&shapeSrc)
