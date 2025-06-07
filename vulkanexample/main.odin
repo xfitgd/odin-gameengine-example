@@ -170,7 +170,7 @@ main :: proc() {
     engine.Update = Update
     engine.Destroy = Destroy
     engine.Size = Size
-    engine.engineMain(windowWidth = int(CANVAS_W), windowHeight = int(CANVAS_H), vSync = .None)
+    engine.engineMain(windowWidth = int(CANVAS_W), windowHeight = int(CANVAS_H))
 }
 
 
