@@ -12,6 +12,7 @@ import "vendor:engine"
 import "vendor:engine/font"
 import "vendor:engine/sound"
 import "vendor:engine/geometry"
+import "vendor:engine/gui"
 import "core:debug/trace"
 
 is_android :: engine.is_android
@@ -35,12 +36,19 @@ bgSnd : ^sound.Sound
 bgSndFileData:[]u8
 
 
-Image2_Init :: proc(self:^engine.Image, src:^engine.Texture, pos:linalg.Point3DF,
+GUI_Image_Init :: proc(self:^GUI_Image, src:^engine.Texture,
 camera:^engine.Camera, projection:^engine.Projection,
-rotation:f32 = 0.0, scale:linalg.PointF = {1,1}, colorTransform:^engine.ColorTransform = nil) {
-    engine.Image_Init(auto_cast self, engine.Image, src, pos, camera, projection, rotation, scale, colorTransform)
+colorTransform:^engine.ColorTransform = nil) {
+    engine.Image_Init2(auto_cast self, GUI_Image, src, camera, projection, colorTransform)
+
+    gui.gui_component_size(self)
 }
 
+
+GUI_Image :: struct {
+    using _:engine.Image,
+    using _:gui.gui_component,
+}
 
 Init ::proc() {
     renderCmd = engine.RenderCmd_Init()
@@ -122,8 +130,15 @@ Init ::proc() {
     }
     engine.Texture_Init(&texture, engine.image_converter_width(pngD), engine.image_converter_height(pngD), imgData)
 
-    img: ^engine.Image = engine.AllocObject(engine.Image)
-    Image2_Init(img, &texture,  {0.0, 0.0, 0.0}, &camera, &proj)
+    img: ^GUI_Image = engine.AllocObject(GUI_Image)
+    img.gui_scale = {1.0, 1.0}
+    img.gui_align_x = .left
+    img.gui_center_pt.x = 200.0
+
+    
+    GUI_Image_Init(img, &texture,  &camera, &proj)
+    
+
     engine.RenderCmd_AddObject(renderCmd, img)
 
     //Show
@@ -145,6 +160,7 @@ Update ::proc() {
 }
 Size :: proc() {
     engine.Projection_UpdateOrthoWindow(&proj, CANVAS_W, CANVAS_H)
+    gui.gui_component_size( (^GUI_Image)(engine.RenderCmd_GetObject(renderCmd, 1)))
 }
 Destroy ::proc() {
     engine.ShapeSrc_Deinit(&shapeSrc)
