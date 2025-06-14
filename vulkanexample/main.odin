@@ -50,6 +50,8 @@ GUI_Image :: struct {
     com:gui.gui_component,
 }
 
+panda_img : []u8 = #load("../bin/panda.qoi")
+
 Init ::proc() {
     renderCmd = engine.RenderCmd_Init()
 
@@ -124,10 +126,17 @@ Init ::proc() {
     //Image Test
     qoiD :^engine.qoi_converter = new(engine.qoi_converter, engine.defAllocator())
 
-    imgData, errCode := engine.image_converter_load_file(qoiD, "panda.qoi", .RGBA)
+    //imgData, errCode := engine.image_converter_load_file(qoiD, "panda.qoi", .RGBA)
+    imgData, errCode := engine.image_converter_load(qoiD, panda_img, .RGBA)
     if errCode != nil {
         trace.panic_log(errCode)
     }
+
+    engine.SetWindowIcon([]engine.Icon_Image{{
+        width = auto_cast engine.image_converter_width(qoiD),
+        height = auto_cast engine.image_converter_height(qoiD),
+        pixels = &imgData[0],
+    }})
 
     engine.Texture_Init(&texture, engine.image_converter_width(qoiD), engine.image_converter_height(qoiD), imgData)
 

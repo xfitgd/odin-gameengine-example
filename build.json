@@ -4,7 +4,8 @@
         "is-android" : false,
         "main-package" : "vulkanexample",
         "out-path" : "bin/test",
-        "build-type" : "minimal"
+        "build-type" : "minimal",
+        "log" : false
     },
     "android-paths" : {
         "ndk" : "/usr/local/Android/ndk/29.0.13113456",
