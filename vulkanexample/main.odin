@@ -82,7 +82,7 @@ Init ::proc() {
         trace.panic_log(freeTypeErr)
     }
 
-    //engine.Font_SetScale(font, 1)
+    //font.Font_SetScale(ft, 2)
 
     renderOpt := font.FontRenderOpt{
         color = linalg.Point3DwF{1,1,1,1},
@@ -90,7 +90,7 @@ Init ::proc() {
         scale = linalg.PointF{3,3},
     }
 
-    rawText, shapeErr := font.Font_RenderString(ft, "놀면서 개발", renderOpt, context.temp_allocator)
+    rawText, shapeErr := font.Font_RenderString(ft, "안녕", renderOpt, context.temp_allocator)
     if shapeErr != .None {
         trace.panic_log(shapeErr)
     }
@@ -122,16 +122,17 @@ Init ::proc() {
     // bgSnd, _ = sound.SoundSrc_PlaySoundMemory(bgSndSrc, 0.2, true)
 
     //Image Test
-    pngD :^engine.png_decoder = new(engine.png_decoder, engine.defAllocator())
+    qoiD :^engine.qoi_converter = new(engine.qoi_converter, engine.defAllocator())
 
-    imgData, errCode := engine.image_converter_load_file(pngD, "panda.png", .RGBA)
+    imgData, errCode := engine.image_converter_load_file(qoiD, "panda.qoi", .RGBA)
     if errCode != nil {
         trace.panic_log(errCode)
     }
-    engine.Texture_Init(&texture, engine.image_converter_width(pngD), engine.image_converter_height(pngD), imgData)
+
+    engine.Texture_Init(&texture, engine.image_converter_width(qoiD), engine.image_converter_height(qoiD), imgData)
 
     img: ^GUI_Image = engine.AllocObject(GUI_Image)
-    img.com.gui_scale = {1.0, 1.0}
+    img.com.gui_scale = {0.7,0.7}
     img.com.gui_rotation = math.to_radians_f32(45.0)
     img.com.gui_align_x = .left
     img.com.gui_pos.x = 200.0
@@ -147,14 +148,14 @@ Init ::proc() {
     WaitThread :: proc(data:rawptr) {
         engine.GraphicsWaitAllOps()
 
-        engine.image_converter_deinit(cast(^engine.png_decoder)data)
+        engine.image_converter_deinit(cast(^engine.qoi_converter)data)
         free(data, engine.defAllocator())
     }
-    thread.create_and_start_with_data(pngD, WaitThread, self_cleanup = true)
+    thread.create_and_start_with_data(qoiD, WaitThread, self_cleanup = true)
 
     // engine.GraphicsWaitAllOps()
 
-    // engine.webp_decoder_deinit(webpD)
+    // engine.image_converter_deinit(qoiD)
 }
 Update ::proc() {
 }
@@ -180,7 +181,7 @@ Destroy ::proc() {
     //sound.SoundSrc_Deinit(bgSndSrc)
     //delete(bgSndFileData)
 
-    //engine.webp_decoder_deinit(&webpD)
+    //engine.webp_converter_deinit(&webpD)
 }
 
 
