@@ -5,9 +5,20 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Debug (Windows)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/bin/test.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/bin",
+            "environment": [],
+            "console": "externalTerminal"
+        },
+        {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug",
+            "name": "Debug (linux)",
             "program": "bin/test",
             "args": [],
             "cwd": "${workspaceFolder}/bin",

@@ -3,7 +3,7 @@
     "setting" : {
         "is-android" : false,
         "main-package" : "vulkanexample",
-        "out-path" : "bin/test",
+        "out-path" : "bin/test.exe",
         "build-type" : "minimal",
         "log" : false
     },

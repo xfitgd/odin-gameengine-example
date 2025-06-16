@@ -189,8 +189,6 @@ Destroy ::proc() {
 
     //sound.SoundSrc_Deinit(bgSndSrc)
     //delete(bgSndFileData)
-
-    //engine.webp_converter_deinit(&webpD)
 }
 
 
