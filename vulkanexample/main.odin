@@ -35,6 +35,7 @@ bgSnd : ^sound.Sound
 
 bgSndFileData:[]u8
 
+IDI_ICON1 :: 101
 
 GUI_Image_Init :: proc(self:^GUI_Image, src:^engine.Texture,
 camera:^engine.Camera, projection:^engine.Projection,
@@ -132,11 +133,7 @@ Init ::proc() {
         trace.panic_log(errCode)
     }
 
-    engine.SetWindowIcon([]engine.Icon_Image{{
-        width = auto_cast engine.image_converter_width(qoiD),
-        height = auto_cast engine.image_converter_height(qoiD),
-        pixels = &imgData[0],
-    }})
+    engine.Windows_SetResIcon(IDI_ICON1)
 
     engine.Texture_Init(&texture, engine.image_converter_width(qoiD), engine.image_converter_height(qoiD), imgData)
 
