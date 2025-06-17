@@ -1,0 +1,45 @@
+#include "winres.h"
+
+LANGUAGE LANG_KOREAN, SUBLANG_NEUTRAL
+#pragma code_page(1252)
+
+#define IDI_ICON1                       101
+
+#define Q(x) #x
+#define QUOTE(x) Q(x)
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 0,1,0,0
+ PRODUCTVERSION 0,1,0,0
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "041204b0"
+        BEGIN
+            VALUE "CompanyName", "https://github.com/xfitgd/Odin-GameEngine/"
+            VALUE "FileDescription", "vulkanexample"
+            VALUE "FileVersion", "0.1.0.0"
+            VALUE "InternalName", "test.exe"
+            VALUE "LegalCopyright", "Copyright (c) 2024"
+            VALUE "OriginalFilename", "test.exe"
+            VALUE "ProductName", "Vulkan Example"
+            VALUE "ProductVersion", "0.1.0.0"
+            VALUE "Comments", "This example shows a simple setup for use Odin-GameEngine"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0412, 1200
+    END
+END
+
+IDI_ICON1   ICON    "example_icon.ico"

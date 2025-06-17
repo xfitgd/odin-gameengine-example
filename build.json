@@ -5,7 +5,8 @@
         "main-package" : "vulkanexample",
         "out-path" : "bin/test.exe",
         "build-type" : "minimal",
-        "log" : false
+        "log" : false,
+        "resource" : "win_res/icon.rc"
     },
     "android-paths" : {
         "ndk" : "/usr/local/Android/ndk/29.0.13113456",
