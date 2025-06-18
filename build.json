@@ -1,17 +1,17 @@
 {
     "$schema": "https://raw.githubusercontent.com/xfitgd/Odin-GameEngine/master/build_tool.schema.json",
     "setting" : {
-        "is-android" : false,
+        "is-android" : true,
         "main-package" : "vulkanexample",
-        "out-path" : "bin/test.exe",
+        "out-path" : "bin/test",
         "build-type" : "minimal",
         "log" : false,
         "resource" : "win_res/icon.rc"
     },
     "android-paths" : {
-        "ndk" : "/usr/local/Android/ndk/29.0.13113456",
-        "sdk" : "/usr/local/Android",
+        "ndk" : "C:\\Android\\ndk\\29.0.13599879",
+        "sdk" : "C:\\Android",
         "build-tools-version" : "36.0.0",
-        "platform-version" : "35"
+        "platform-version" : 35
     }
 }
