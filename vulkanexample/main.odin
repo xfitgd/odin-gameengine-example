@@ -124,6 +124,42 @@ Init ::proc() {
     // bgSndSrc, _ = sound.SoundSrc_DecodeSoundMemory(bgSndFileData)
     // bgSnd, _ = sound.SoundSrc_PlaySoundMemory(bgSndSrc, 0.2, true)
 
+    //Input Test
+    generalInputFn :: proc(state:engine.GENERAL_INPUT_STATE) {//current android only support
+        engine.printfln("GENERAL [%v]", state.handle)
+        engine.printfln("buttons:%s%s%s%s %s %s",
+            state.buttons.a ? "A" : " ",
+            state.buttons.b ? "B" : " ",
+            state.buttons.x ? "X" : " ",
+            state.buttons.y ? "Y" : " ",
+            state.buttons.back ? "BACK" : " ",
+            state.buttons.start ? "START" : " ")
+
+        engine.printfln("DPAD:%s%s%s%s Shoulders:%s%s %s%s",
+            state.buttons.dpadUp ? "U" : " ",
+            state.buttons.dpadDown ? "D" : " ",
+            state.buttons.dpadLeft ? "L" : " ",
+            state.buttons.dpadRight ? "R" : " ",
+            state.buttons.leftShoulder ? "L" : " ",
+            state.buttons.rightShoulder ? "R" : " ",
+            state.buttons.volumeUp ? "+" : " ",
+            state.buttons.volumeDown ? "-" : " ")
+
+        engine.printfln("Thumb:%s%s LeftThumb:(%f,%f) RightThumb:(%f,%f)",
+            state.buttons.leftThumb ? "L" : " ",
+            state.buttons.rightThumb ? "R" : " ",
+            state.leftThumb.x,
+            state.leftThumb.y,
+            state.rightThumb.x,
+            state.rightThumb.y)
+
+        engine.printfln("Trigger:(%f,%f)",
+            state.leftTrigger,
+            state.rightTrigger)
+    }
+    engine.GeneralInputCallBack = generalInputFn
+    //
+
     //Image Test
     qoiD :^engine.qoi_converter = new(engine.qoi_converter, engine.defAllocator())
 
