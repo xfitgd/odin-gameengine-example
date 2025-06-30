@@ -8,6 +8,7 @@ import "core:math/rand"
 import "core:math/linalg"
 import "core:reflect"
 import "core:os/os2"
+import "core:sys/android"
 import "vendor:engine"
 import "vendor:engine/font"
 import "vendor:engine/sound"
@@ -66,8 +67,8 @@ Init ::proc() {
     defer delete(fontFileData, context.temp_allocator)
 
     when engine.is_android {
-        fontFileReadErr : engine.Android_AssetFileError
-        fontFileData, fontFileReadErr = engine.Android_AssetReadFile("omyu pretty.ttf", context.temp_allocator)
+        fontFileReadErr : android.AssetFileError
+        fontFileData, fontFileReadErr = android.asset_read_file("omyu pretty.ttf", context.temp_allocator)
         if fontFileReadErr != .None {
             trace.panic_log(fontFileReadErr)
         }
@@ -108,8 +109,8 @@ Init ::proc() {
 
     //Sound Test
     // when engine.is_android {
-    //     sndFileReadErr : engine.Android_AssetFileError
-    //     bgSndFileData, sndFileReadErr = engine.Android_AssetReadFile("BG.opus", context.allocator)
+    //     sndFileReadErr : engine.android.AssetFileError
+    //     bgSndFileData, sndFileReadErr = engine.android.asset_read_file("BG.opus", context.allocator)
     //     if sndFileReadErr != .None {
     //         trace.panic_log(sndFileReadErr)
     //     }
