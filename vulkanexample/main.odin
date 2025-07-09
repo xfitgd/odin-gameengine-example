@@ -162,17 +162,18 @@ Init ::proc() {
     //
 
     //Image Test
-    qoiD :^engine.qoi_converter = new(engine.qoi_converter, engine.defAllocator())
+    qoiD :engine.qoi_converter
+    defer engine.qoi_converter_deinit(&qoiD)
 
     //imgData, errCode := engine.image_converter_load_file(qoiD, "panda.qoi", .RGBA)
-    imgData, errCode := engine.image_converter_load(qoiD, panda_img, .RGBA)
+    imgData, errCode := engine.image_converter_load(&qoiD, panda_img, .RGBA)
     if errCode != nil {
         trace.panic_log(errCode)
     }
 
     engine.Windows_SetResIcon(IDI_ICON1)
 
-    engine.Texture_Init(&texture, engine.image_converter_width(qoiD), engine.image_converter_height(qoiD), imgData)
+    engine.Texture_Init(&texture, engine.image_converter_width(&qoiD), engine.image_converter_height(&qoiD), imgData)
 
     img: ^GUI_Image = engine.AllocObject(GUI_Image)
     img.com.gui_scale = {0.7,0.7}
@@ -188,13 +189,10 @@ Init ::proc() {
     //Show
     engine.RenderCmd_Show(renderCmd)
 
-    WaitThread :: proc(data:rawptr) {
-        engine.GraphicsWaitAllOps()
-
-        engine.image_converter_deinit(cast(^engine.qoi_converter)data)
-        free(data, engine.defAllocator())
-    }
-    thread.create_and_start_with_data(qoiD, WaitThread, self_cleanup = true)
+    // WaitThread :: proc(data:rawptr) {
+    //     engine.GraphicsWaitAllOps()
+    // }
+    // thread.create_and_start_with_data(qoiD, WaitThread, self_cleanup = true)
 
     // engine.GraphicsWaitAllOps()
 
