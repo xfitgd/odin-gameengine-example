@@ -61,7 +61,7 @@ Init ::proc() {
     engine.Projection_InitMatrixOrthoWindow(&proj, CANVAS_W, CANVAS_H)
 
     //Font Test
-    shape: ^engine.Shape = engine.AllocObjectNonZeroed(engine.Shape)
+    shape: ^engine.Shape = engine.AllocObject(engine.Shape)
 
     fontFileData:[]u8
     defer delete(fontFileData, context.temp_allocator)
