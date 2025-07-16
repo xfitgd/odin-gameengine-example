@@ -108,22 +108,22 @@ Init ::proc() {
     engine.RenderCmd_AddObject(renderCmd, shape)
 
     //Sound Test
-    // when engine.is_android {
-    //     sndFileReadErr : engine.android.AssetFileError
-    //     bgSndFileData, sndFileReadErr = engine.android.asset_read_file("BG.opus", context.allocator)
-    //     if sndFileReadErr != .None {
-    //         trace.panic_log(sndFileReadErr)
-    //     }
-    // } else {
-    //     sndFileReadErr :os2.Error
-    //     bgSndFileData, sndFileReadErr = os2.read_entire_file_from_path("BG.opus", context.allocator)
-    //     if sndFileReadErr != nil {
-    //         trace.panic_log(sndFileReadErr)
-    //     }
-    // }
+    when engine.is_android {
+        sndFileReadErr : android.AssetFileError
+        bgSndFileData, sndFileReadErr = android.asset_read_file("BG.opus", context.allocator)
+        if sndFileReadErr != .None {
+            trace.panic_log(sndFileReadErr)
+        }
+    } else {
+        sndFileReadErr :os2.Error
+        bgSndFileData, sndFileReadErr = os2.read_entire_file_from_path("BG.opus", context.allocator)
+        if sndFileReadErr != nil {
+            trace.panic_log(sndFileReadErr)
+        }
+    }
 
-    // bgSndSrc, _ = sound.SoundSrc_DecodeSoundMemory(bgSndFileData)
-    // bgSnd, _ = sound.SoundSrc_PlaySoundMemory(bgSndSrc, 0.2, true)
+    bgSndSrc, _ = sound.SoundSrc_DecodeSoundMemory(bgSndFileData)
+    bgSnd, _ = sound.SoundSrc_PlaySoundMemory(bgSndSrc, 0.2, true)
 
     //Input Test
     generalInputFn :: proc(state:engine.GENERAL_INPUT_STATE) {//current android only support
@@ -219,8 +219,8 @@ Destroy ::proc() {
     engine.Camera_Deinit(&camera)
     engine.Projection_Deinit(&proj)
 
-    //sound.SoundSrc_Deinit(bgSndSrc)
-    //delete(bgSndFileData)
+    sound.SoundSrc_Deinit(bgSndSrc)
+    delete(bgSndFileData)
 }
 
 
